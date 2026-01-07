@@ -30,4 +30,4 @@ A full-stack web application built with Flask to track and analyze personal expe
 1. **Clone the repository**
    ```bash
    git clone https://github.com/YOUR_USERNAME/expense-tracker.git
-   cd expense-tracker
+   cd expense-tracker.
