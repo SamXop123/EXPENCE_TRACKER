@@ -4,6 +4,12 @@
 <div class="row">
     <div class="col-12">
         <h2>Dashboard</h2>
+        <form method="post" action="{{ url_for('set_currency') }}">
+            {% set label_text = "Select Your Desired Currency (Everything will be converted to this)" %}
+            {% set auto_submit = true %}
+            {% include "partials/common_input.html" %}
+        </form>
+      
         <p>Welcome back, {{ session.username }}!</p>
     </div>
 </div>
@@ -13,7 +19,7 @@
         <div class="card text-white bg-primary mb-3">
             <div class="card-body">
                 <h5 class="card-title">Total Expenses</h5>
-                <h2 class="card-text">${{ "%.2f"|format(total_expenses) }}</h2>
+                <h2 class="card-text">{{ currency }} {{ "%.2f"|format(total_expenses) }}</h2>
             </div>
         </div>
     </div>
@@ -21,7 +27,7 @@
         <div class="card text-white bg-info mb-3">
             <div class="card-body">
                 <h5 class="card-title">This Month</h5>
-                <h2 class="card-text">${{ "%.2f"|format(monthly_expenses) }}</h2>
+                <h2 class="card-text">{{ currency }} {{ "%.2f"|format(monthly_expenses) }}</h2>
             </div>
         </div>
     </div>
@@ -30,7 +36,7 @@
         <div class="card text-white bg-success mb-3">
             <div class="card-body">
                 <h5 class="card-title">Total Budget</h5>
-                <h2 class="card-text">${{ "%.2f"|format(total_budget) }}</h2>
+                <h2 class="card-text">{{ currency }} {{ "%.2f"|format(total_budget) }}</h2>
             </div>
         </div>
     </div>
@@ -38,7 +44,7 @@
         <div class="card text-white {% if total_budget_spent > total_budget %}bg-danger{% elif total_budget_spent > total_budget * 0.8 %}bg-warning{% else %}bg-success{% endif %} mb-3">
             <div class="card-body">
                 <h5 class="card-title">Budget Spent</h5>
-                <h2 class="card-text">${{ "%.2f"|format(total_budget_spent) }}</h2>
+                <h2 class="card-text">{{ currency }} {{ "%.2f"|format(total_budget_spent) }}</h2>
                 <small>{{ "%.1f"|format((total_budget_spent / total_budget * 100) if total_budget > 0 else 0) }}% used</small>
             </div>
         </div>
@@ -58,9 +64,9 @@
                 <div class="alert alert-{% if alert.status == 'exceeded' %}danger{% else %}warning{% endif %} mb-2" role="alert">
                     <strong>{{ alert.category }}:</strong> 
                     {% if alert.status == 'exceeded' %}
-                        Budget exceeded by ${{ "%.2f"|format(-alert.remaining) }} ({{ "%.1f"|format(alert.percentage) }}% used)
+                    Budget exceeded by {{ currency }} {{ "%.2f"|format(-alert.remaining) }}  ({{ "%.1f"|format(alert.percentage) }}% used)
                     {% else %}
-                        {{ "%.1f"|format(alert.percentage) }}% of budget used. ${{ "%.2f"|format(alert.remaining) }} remaining.
+                        {{ "%.1f"|format(alert.percentage) }}% of budget used. {{ currency }} {{ "%.2f"|format(alert.remaining) }} remaining.
                     {% endif %}
                 </div>
                 {% endfor %}
@@ -87,6 +93,7 @@
                                 <th>Category</th>
                                 <th>Description</th>
                                 <th>Amount</th>
+                                <th>In your currency</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -95,7 +102,9 @@
                                 <td>{{ expense['date'] }}</td>
                                 <td>{{ expense['category'] }}</td>
                                 <td>{{ expense['description'] or '-' }}</td>
-                                <td>${{ "%.2f"|format(expense['amount']) }}</td>
+                                <td>{{ expense['currency'] }} {{ "%.2f"|format(expense['amount']) }}</td>
+                                <td>{{ currency }} {{ "%.2f"|format(expense['amount_display']) }}</td>
+
                             </tr>
                             {% endfor %}
                         </tbody>

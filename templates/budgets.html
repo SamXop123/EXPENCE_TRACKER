@@ -21,18 +21,18 @@
                 <div class="mb-3">
                     <div class="d-flex justify-content-between mb-2">
                         <span>Budget:</span>
-                        <strong>${{ "%.2f"|format(budget.amount) }}</strong>
+                        <strong>{{ currency }}{{ "%.2f"|format(budget.amount) }}</strong>
                     </div>
                     <div class="d-flex justify-content-between mb-2">
                         <span>Spent:</span>
                         <strong class="{% if budget.percentage_used >= 100 %}text-danger{% elif budget.percentage_used >= 80 %}text-warning{% else %}text-success{% endif %}">
-                            ${{ "%.2f"|format(budget.actual_spending) }}
+                            {{ currency }}{{ "%.2f"|format(budget.actual_spending) }}
                         </strong>
                     </div>
                     <div class="d-flex justify-content-between mb-2">
                         <span>Remaining:</span>
                         <strong class="{% if budget.remaining < 0 %}text-danger{% else %}text-success{% endif %}">
-                            ${{ "%.2f"|format(budget.remaining) }}
+                            {{ currency }}{{ "%.2f"|format(budget.remaining) }}
                         </strong>
                     </div>
                 </div>

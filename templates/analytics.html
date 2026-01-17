@@ -23,7 +23,7 @@
     <div class="col-md-4">
         <div class="card">
             <div class="card-header">
-                <h5 class="mb-0">Spending by Category</h5>
+                <h5 class="mb-0">Spending by Category ({{ currency }})</h5>
             </div>
             <div class="card-body">
                 <canvas id="categoryChart" height="250"></canvas>
@@ -36,7 +36,7 @@
 {% block scripts %}
 <script>
 document.addEventListener('DOMContentLoaded', function() {
-    // Daily Spending Chart
+    
     const dailyCtx = document.getElementById('dailySpendingChart');
     if (dailyCtx) {
         const dailyChart = new Chart(dailyCtx, {
@@ -44,7 +44,7 @@ document.addEventListener('DOMContentLoaded', function() {
             data: {
                 labels: JSON.parse('{{ labels | safe }}'),
                 datasets: [{
-                    label: 'Daily Spending',
+                    label: 'Daily Spending ({{ currency }})',
                     data: JSON.parse('{{ daily_data | safe }}'),
                     borderColor: 'rgb(75, 192, 192)',
                     backgroundColor: 'rgba(75, 192, 192, 0.1)',
@@ -64,7 +64,7 @@ document.addEventListener('DOMContentLoaded', function() {
                         beginAtZero: true,
                         ticks: {
                             callback: function(value) {
-                                return '$' + value;
+                                return '{{ currency }} ' + value;
                             }
                         }
                     },
@@ -78,7 +78,7 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
-    // Category Chart
+    
     const categoryCtx = document.getElementById('categoryChart');
     if (categoryCtx) {
         const categoryChart = new Chart(categoryCtx, {

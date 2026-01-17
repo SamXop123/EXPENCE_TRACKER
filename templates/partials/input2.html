@@ -1,0 +1,23 @@
+<div class="mb-3">
+    <label for="amount" class="form-label">Amount</label>
+    <input type="number" step="0.01" min="0.01" class="form-control" id="amount" name="amount" required
+        value="{{ expense.amount if expense is defined else '' }}">
+</div>
+<div class="mb-3">
+    <label for="category" class="form-label">Category</label>
+    <select class="form-select" id="category" name="category" required>
+        <option value="">Select Category</option>
+        {% for cat in ["Food","Transportation","Entertainment","Shopping","Bills","Healthcare","Other"] %}
+        <option value="{{ cat }}" {% if expense is defined and expense.category==cat %}selected{% endif %}>
+            {{ cat }}
+        </option>
+        {% endfor %}
+    </select>
+</div>
+
+
+<div class="mb-3">
+    <label for="description" class="form-label">Description</label>
+    <textarea class="form-control" id="description" name="description"
+        rows="3">{{ expense.description if expense is defined else '' }}</textarea>
+</div>

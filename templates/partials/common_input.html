@@ -1,0 +1,87 @@
+<div class="mb-3">
+    <label for="currency" class="form-label">
+        {{ label_text or "Currency" }}
+    </label>
+    <select id="currency" name="currency" class="form-select" required data-selected-currency="{{ currency }}"></select>
+</div>
+
+
+
+
+
+<script>
+    document.addEventListener("DOMContentLoaded", function () {
+        const selectEl = document.getElementById("currency");
+        const AUTO_SUBMIT = JSON.parse('{{ auto_submit | default(false) | tojson }}');
+
+
+        const selectedCurrency = selectEl.dataset.selectedCurrency;
+
+
+        fetch("{{ url_for('static', filename='data/currencies.json') }}")
+            .then(r => r.json())
+            .then(currencies => {
+
+                const popular = currencies.filter(c => c.popular);
+
+                const ts = new TomSelect('#currency', {
+                    placeholder: 'Select currency…',
+
+                    valueField: 'code',
+                    labelField: 'code',
+                    searchField: ['code', 'name'],
+                    options: popular,
+                    filter: true,
+                    maxItems: 1,
+
+                    closeAfterSelect: true,
+
+
+
+
+                    onChange(value) {
+                        if (AUTO_SUBMIT) {
+                            const form = selectEl.closest('form');
+                            if (form) form.submit();
+                        }
+                    },
+
+
+
+
+
+                    onType(query) {
+                        if (query.length > 0) {
+                            this.clearOptions();
+                            this.addOptions(currencies);
+                            this.refreshOptions(false);
+                        }
+                    },
+
+
+                    onDropdownClose() {
+                        this.clearOptions();
+                        this.addOptions(popular);
+                        this.refreshOptions(false);
+                    },
+
+                    render: {
+                        option(item) {
+                            return `
+            <div>
+              ${item.popular ? '⭐ ' : ''}${item.code} — ${item.name}
+            </div>`;
+                        },
+                        item(item) {
+                            return `<div>${item.code}</div>`;
+                        }
+                    }
+                });
+                if (selectedCurrency) {
+                    ts.setValue(selectedCurrency, true);
+                }
+
+            });
+    });
+
+</script>
