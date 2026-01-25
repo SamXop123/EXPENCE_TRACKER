@@ -5,7 +5,8 @@ from werkzeug.security import generate_password_hash, check_password_hash
 import json
 import requests
 import time
-
+import os
+from groq import Groq
 
 _RATES_CACHE = {
     "timestamp": 0,
@@ -655,6 +656,109 @@ def delete_budget(budget_id):
     flash('Budget deleted successfully!')
     return redirect(url_for('budgets'))
 
+
+# chatbot
+
+
+
+groq_client = Groq(
+    api_key="YOUR GROQ API"
+)
+
+def get_user_financial_context(user_id):
+    conn = get_db_connection()
+
+    # Total expenses
+    total_usd = conn.execute(
+        "SELECT COALESCE(SUM(amount_usd), 0) FROM expenses WHERE user_id = ?",
+        (user_id,)
+    ).fetchone()[0]
+
+    # Monthly expenses
+    month_start = datetime.now().replace(day=1).strftime('%Y-%m-%d')
+    monthly_usd = conn.execute(
+        """
+        SELECT COALESCE(SUM(amount_usd), 0)
+        FROM expenses WHERE user_id = ? AND date >= ?
+        """,
+        (user_id, month_start)
+    ).fetchone()[0]
+
+    # Category breakdown
+    categories = conn.execute(
+        """
+        SELECT category, SUM(amount_usd) as total
+        FROM expenses
+        WHERE user_id = ?
+        GROUP BY category
+        """,
+        (user_id,)
+    ).fetchall()
+
+    # Budgets
+    budgets = conn.execute(
+        """
+        SELECT category, amount_usd
+        FROM budgets
+        WHERE user_id = ?
+        """,
+        (user_id,)
+    ).fetchall()
+
+    conn.close()
+
+    return {
+        "total_expenses_usd": round(total_usd, 2),
+        "monthly_expenses_usd": round(monthly_usd, 2),
+        "categories": {row["category"]: round(row["total"], 2) for row in categories},
+        "budgets": {row["category"]: round(row["amount_usd"], 2) for row in budgets},
+    }
+@app.route('/chatbot', methods=['POST'])
+def chatbot():
+    if 'user_id' not in session:
+        return {"reply": "Unauthorized"}, 401
+
+    data = request.get_json()
+    user_message = data.get("message", "").strip()
+
+    if not user_message:
+        return {"reply": "Please enter a message."}
+
+    context = get_user_financial_context(session['user_id'])
+
+    system_prompt = f"""
+You are a personal finance assistant.
+
+User data (USD):
+- Total expenses: {context['total_expenses_usd']}
+- Monthly expenses: {context['monthly_expenses_usd']}
+- Category totals: {context['categories']}
+- Budgets: {context['budgets']}
+
+Rules:
+- Do not invent data
+- Answer clearly
+"""
+
+    try:
+        response = groq_client.chat.completions.create(
+            model="llama-3.1-8b-instant",
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_message}
+            ],
+            temperature=0.4,
+            max_tokens=300
+        )
+
+
+        return {"reply": response.choices[0].message.content}
+
+    except Exception as e:
+        print(e)
+        return {"reply": "AI service error. Try again later."}
+
+
 if __name__ == '__main__':
     init_db()
     try:
@@ -662,4 +766,4 @@ if __name__ == '__main__':
         _RATES_CACHE["timestamp"] = time.time()
     except Exception:
         pass
-    app.run(debug=False)
+    app.run(debug=True)

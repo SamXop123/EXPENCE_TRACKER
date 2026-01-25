@@ -117,4 +117,88 @@
         </div>
     </div>
 </div>
+
+<!-- ================= AI CHATBOT ================= -->
+<div class="row mt-5">
+    <div class="col-12 col-lg-8 mx-auto">
+        <div class="card shadow-sm">
+            <div class="card-header bg-dark text-white">
+                <h5 class="mb-0">🤖 AI Finance Assistant</h5>
+                <small class="text-muted">Ask about your expenses, budgets & savings</small>
+            </div>
+
+            <div class="card-body" style="height: 320px; overflow-y: auto;" id="chat-messages">
+                <div class="text-muted">
+                    👋 Hi {{ session.username }}!  
+                    Ask things like:
+                    <ul>
+                        <li>How much did I spend this month?</li>
+                        <li>Which category is highest?</li>
+                        <li>Am I exceeding my budget?</li>
+                    </ul>
+                </div>
+            </div>
+
+            <div class="card-footer">
+                <div class="input-group">
+                    <input
+                        type="text"
+                        id="chat-input"
+                        class="form-control"
+                        placeholder="Ask a question about your expenses..."
+                        onkeypress="if(event.key==='Enter') sendMessage()"
+                    >
+                    <button class="btn btn-primary" onclick="sendMessage()">Send</button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+async function sendMessage() {
+    const input = document.getElementById("chat-input");
+    const message = input.value.trim();
+    if (!message) return;
+
+    const chatBox = document.getElementById("chat-messages");
+
+    // User message
+    chatBox.innerHTML += `
+        <div class="mb-2">
+            <strong>You:</strong> ${message}
+        </div>
+    `;
+
+    chatBox.scrollTop = chatBox.scrollHeight;
+    input.value = "";
+
+    try {
+        const response = await fetch("/chatbot", {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json"
+            },
+            body: JSON.stringify({ message })
+        });
+
+        const data = await response.json();
+
+        chatBox.innerHTML += `
+            <div class="mb-3 text-primary">
+                <strong>AI:</strong> ${data.reply}
+            </div>
+        `;
+        chatBox.scrollTop = chatBox.scrollHeight;
+
+    } catch (error) {
+        chatBox.innerHTML += `
+            <div class="text-danger">
+                <strong>AI:</strong> Something went wrong. Please try again.
+            </div>
+        `;
+    }
+}
+</script>
+
 {% endblock %}
