@@ -8,7 +8,11 @@ if defined _OLD_CODEPAGE (
     "%SystemRoot%\System32\chcp.com" 65001 > nul
 )
 
+<<<<<<< HEAD
 set VIRTUAL_ENV=C:\Users\anshi\OneDrive\Desktop\Expence tracker\venv
+=======
+set VIRTUAL_ENV=C:\Users\anshi\OneDrive\Desktop\Expence tracker\EXPENCE_TRACKER\venv
+>>>>>>> e10860d02eca9d543b8168a24273c645bc31fd2a
 
 if not defined PROMPT set PROMPT=$P$G
 
