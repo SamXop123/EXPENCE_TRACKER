@@ -1,0 +1,91 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container mt-5">
+    <div class="row justify-content-center">
+        <div class="col-md-8">
+            <div class="card">
+                <div class="card-header">
+                    <h3 class="text-center">Map CSV Columns</h3>
+                </div>
+                <div class="card-body">
+                    <p class="text-muted">Tell us which column in your CSV matches our expense fields.</p>
+                    <form action="{{ url_for('process_import') }}" method="POST">
+                        <div class="table-responsive">
+                            <table class="table">
+                                <thead>
+                                    <tr>
+                                        <th>Expense Field</th>
+                                        <th>CSV Column</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <tr>
+                                        <td>Amount (Required)</td>
+                                        <td>
+                                            <select name="amount" class="form-select" required>
+                                                <option value="">-- Select Column --</option>
+                                                {% for col in columns %}
+                                                <option value="{{ col }}">{{ col }}</option>
+                                                {% endfor %}
+                                            </select>
+                                        </td>
+                                    </tr>
+                                    <tr>
+                                        <td>Date</td>
+                                        <td>
+                                            <select name="date" class="form-select">
+                                                <option value="">-- Select Column --</option>
+                                                {% for col in columns %}
+                                                <option value="{{ col }}">{{ col }}</option>
+                                                {% endfor %}
+                                            </select>
+                                        </td>
+                                    </tr>
+                                    <tr>
+                                        <td>Category</td>
+                                        <td>
+                                            <select name="category" class="form-select">
+                                                <option value="">-- Select Column --</option>
+                                                {% for col in columns %}
+                                                <option value="{{ col }}">{{ col }}</option>
+                                                {% endfor %}
+                                            </select>
+                                        </td>
+                                    </tr>
+                                    <tr>
+                                        <td>Currency</td>
+                                        <td>
+                                            <select name="currency" class="form-select">
+                                                <option value="">-- Select Column --</option>
+                                                {% for col in columns %}
+                                                <option value="{{ col }}">{{ col }}</option>
+                                                {% endfor %}
+                                            </select>
+                                        </td>
+                                    </tr>
+                                    <tr>
+                                        <td>Description</td>
+                                        <td>
+                                            <select name="description" class="form-select">
+                                                <option value="">-- Select Column --</option>
+                                                {% for col in columns %}
+                                                <option value="{{ col }}">{{ col }}</option>
+                                                {% endfor %}
+                                            </select>
+                                        </td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                        <div class="d-grid gap-2 mt-4">
+                            <button type="submit" class="btn btn-success">Start Import</button>
+                            <a href="{{ url_for('expenses') }}" class="btn btn-outline-secondary">Cancel</a>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

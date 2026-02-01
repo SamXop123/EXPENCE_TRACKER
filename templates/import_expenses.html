@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container mt-5">
+    <div class="row justify-content-center">
+        <div class="col-md-6">
+            <div class="card">
+                <div class="card-header">
+                    <h3 class="text-center">Import Expenses</h3>
+                </div>
+                <div class="card-body">
+                    <p class="text-muted">Upload a CSV file containing your bank statements or expense records.</p>
+                    <form action="{{ url_for('import_expenses') }}" method="POST" enctype="multipart/form-data">
+                        <div class="mb-3">
+                            <label for="file" class="form-label">Choose CSV File</label>
+                            <input class="form-control" type="file" id="file" name="file" accept=".csv" required>
+                        </div>
+                        <div class="d-grid gap-2">
+                            <button type="submit" class="btn btn-primary">Upload & Next</button>
+                            <a href="{{ url_for('expenses') }}" class="btn btn-outline-secondary">Cancel</a>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

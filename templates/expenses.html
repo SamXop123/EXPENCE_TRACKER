@@ -3,16 +3,44 @@
 {% block content %}
 <div class="d-flex justify-content-between align-items-center mb-4">
     <h2>My Expenses</h2>
-    <a href="{{ url_for('add_expense') }}" class="btn btn-primary">Add Expense</a>
+    <div class="btn-group">
+        <a href="{{ url_for('add_expense') }}" class="btn btn-primary">Add Expense</a>
+        <a href="{{ url_for('import_expenses') }}" class="btn btn-outline-primary">Import CSV</a>
+        <div class="dropdown d-inline-block ms-2">
+            <button class="btn btn-secondary dropdown-toggle" type="button" id="exportDropdown" data-bs-toggle="dropdown" aria-expanded="false">
+                Export
+            </button>
+            <ul class="dropdown-menu" aria-labelledby="exportDropdown">
+                <li><a class="dropdown-item" href="{{ url_for('export_data', data_type='expenses', format='csv') }}">CSV</a></li>
+                <li><a class="dropdown-item" href="{{ url_for('export_data', data_type='expenses', format='xlsx') }}">Excel</a></li>
+                <li><a class="dropdown-item" href="{{ url_for('export_data', data_type='expenses', format='pdf') }}">PDF</a></li>
+            </ul>
+        </div>
+    </div>
 </div>
 
 <div class="card">
     <div class="card-body">
         {% if expenses %}
+        <div class="mb-3">
+            <button id="bulkDeleteBtn" class="btn btn-danger btn-sm" style="display: none;">Delete Selected</button>
+            <div class="dropdown d-inline-block" id="bulkUpdateDropdown" style="display: none;">
+                <button class="btn btn-info btn-sm dropdown-toggle" type="button" data-bs-toggle="dropdown">
+                    Update Category
+                </button>
+                <ul class="dropdown-menu">
+                    {% set categories = ['Food', 'Transport', 'Entertainment', 'Shopping', 'Bills', 'Miscellaneous'] %}
+                    {% for cat in categories %}
+                    <li><a class="dropdown-item bulk-update-cat" href="#" data-category="{{ cat }}">{{ cat }}</a></li>
+                    {% endfor %}
+                </ul>
+            </div>
+        </div>
         <div class="table-responsive">
             <table class="table table-striped">
                 <thead>
                     <tr>
+                        <th><input type="checkbox" id="selectAll"></th>
                         <th>Date</th>
                         <th>Category</th>
                         <th>Description</th>
@@ -23,15 +51,14 @@
                 <tbody>
                     {% for expense in expenses %}
                     <tr>
+                        <td><input type="checkbox" class="expense-checkbox" value="{{ expense['id'] }}"></td>
                         <td>{{ expense['date'] }}</td>
                         <td>{{ expense['category'] }}</td>
                         <td>{{ expense['description'] or '-' }}</td>
                         <td>{{ expense['currency'] }} {{ "%.2f"|format(expense['amount']) }}</td>
-
                         <td>
                             <a href="{{ url_for('edit_expense', expense_id=expense['id']) }}" class="btn btn-sm btn-outline-primary">Edit</a>
-                            <a href="/delete/{{ expense.id }}" onclick="return confirm('Are you sure you want to delete this expense?');">Delete</a>
-
+                            <a href="{{ url_for('delete_expense', expense_id=expense['id']) }}" class="btn btn-sm btn-outline-danger" onclick="return confirm('Are you sure?')">Delete</a>
                         </td>
                     </tr>
                     {% endfor %}
@@ -43,4 +70,61 @@
         {% endif %}
     </div>
 </div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const selectAll = document.getElementById('selectAll');
+    const checkboxes = document.querySelectorAll('.expense-checkbox');
+    const bulkDeleteBtn = document.getElementById('bulkDeleteBtn');
+    const bulkUpdateDropdown = document.getElementById('bulkUpdateDropdown');
+
+    function updateBulkActionsVisibility() {
+        const checkedCount = document.querySelectorAll('.expense-checkbox:checked').length;
+        bulkDeleteBtn.style.display = checkedCount > 0 ? 'inline-block' : 'none';
+        bulkUpdateDropdown.style.display = checkedCount > 0 ? 'inline-block' : 'none';
+    }
+
+    if (selectAll) {
+        selectAll.addEventListener('change', function() {
+            checkboxes.forEach(cb => cb.checked = selectAll.checked);
+            updateBulkActionsVisibility();
+        });
+    }
+
+    checkboxes.forEach(cb => {
+        cb.addEventListener('change', updateBulkActionsVisibility);
+    });
+
+    if (bulkDeleteBtn) {
+        bulkDeleteBtn.addEventListener('click', function() {
+            if (!confirm('Are you sure you want to delete selected expenses?')) return;
+            const ids = Array.from(document.querySelectorAll('.expense-checkbox:checked')).map(cb => cb.value);
+            fetch('/bulk_delete_expenses', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ ids: ids })
+            }).then(res => res.json()).then(data => {
+                if (data.success) location.reload();
+                else alert(data.error);
+            });
+        });
+    }
+
+    document.querySelectorAll('.bulk-update-cat').forEach(item => {
+        item.addEventListener('click', function(e) {
+            e.preventDefault();
+            const category = this.dataset.category;
+            const ids = Array.from(document.querySelectorAll('.expense-checkbox:checked')).map(cb => cb.value);
+            fetch('/bulk_update_category', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ ids: ids, category: category })
+            }).then(res => res.json()).then(data => {
+                if (data.success) location.reload();
+                else alert(data.error);
+            });
+        });
+    });
+});
+</script>
 {% endblock %}
