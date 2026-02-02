@@ -1,0 +1,98 @@
+{% extends "base.html" %}
+
+{% block title %}Add Category - Expense Tracker{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-md-6">
+        <div class="card shadow-sm">
+            <div class="card-header text-center">
+                <h4 class="mb-0">Add New Category</h4>
+            </div>
+            <div class="card-body">
+                <form method="POST" action="{{ url_for('add_category') }}">
+                    <div class="mb-3">
+                        <label for="name" class="form-label">Category Name</label>
+                        <input type="text" class="form-control" id="name" name="name"
+                            placeholder="e.g., Groceries, Rent, Travel" required>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label">Icon</label>
+                        <input type="hidden" id="icon" name="icon" value="📁">
+                        <div class="icon-picker">
+                            {% set icons = ['🍔', '🚗', '🎬', '🛒', '📄', '🏥', '📁', '🏠', '✈️', '💼', '📚', '🎮',
+                            '🎵', '💪', '🐕', '🌿', '💰', '🎁', '☕', '🍕'] %}
+                            {% for emoji in icons %}
+                            <button type="button" class="icon-btn {% if emoji == '📁' %}active{% endif %}"
+                                data-icon="{{ emoji }}" onclick="selectIcon(this)">
+                                {{ emoji }}
+                            </button>
+                            {% endfor %}
+                        </div>
+                    </div>
+
+                    <div class="mb-4">
+                        <label for="color" class="form-label">Color</label>
+                        <div class="d-flex align-items-center gap-3">
+                            <input type="color" class="form-control form-control-color" id="color" name="color"
+                                value="#6c757d">
+                            <div class="color-presets">
+                                {% set colors = ['#28a745', '#17a2b8', '#dc3545', '#ffc107', '#6f42c1', '#20c997',
+                                '#6c757d', '#fd7e14', '#e83e8c', '#007bff'] %}
+                                {% for c in colors %}
+                                <button type="button" class="color-preset-btn" style="background-color: {{ c }};"
+                                    data-color="{{ c }}" onclick="selectColor(this)"></button>
+                                {% endfor %}
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label">Preview</label>
+                        <div id="category-preview" class="p-3 rounded" style="background-color: #f8f9fa;">
+                            <span id="preview-badge"
+                                style="background-color: #6c757d; color: white; padding: 6px 16px; border-radius: 20px; font-size: 1rem;">
+                                <span id="preview-icon">📁</span> <span id="preview-name">Category Name</span>
+                            </span>
+                        </div>
+                    </div>
+
+                    <div class="d-grid gap-2">
+                        <button type="submit" class="btn btn-primary">Add Category</button>
+                        <a href="{{ url_for('categories') }}" class="btn btn-secondary">Cancel</a>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    function selectIcon(btn) {
+        document.querySelectorAll('.icon-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        document.getElementById('icon').value = btn.dataset.icon;
+        document.getElementById('preview-icon').textContent = btn.dataset.icon;
+    }
+
+    function selectColor(btn) {
+        document.getElementById('color').value = btn.dataset.color;
+        updatePreview();
+    }
+
+    function updatePreview() {
+        const color = document.getElementById('color').value;
+        document.getElementById('preview-badge').style.backgroundColor = color;
+    }
+
+    document.addEventListener('DOMContentLoaded', function () {
+        document.getElementById('color').addEventListener('input', updatePreview);
+        document.getElementById('name').addEventListener('input', function () {
+            document.getElementById('preview-name').textContent = this.value || 'Category Name';
+        });
+    });
+</script>
+{% endblock %}

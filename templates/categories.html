@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+
+{% block title %}Categories - Expense Tracker{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h2>Manage Categories</h2>
+    <a href="{{ url_for('add_category') }}" class="btn btn-primary">
+        <span class="me-1">➕</span> Add Category
+    </a>
+</div>
+
+<div class="card">
+    <div class="card-body">
+        {% if categories %}
+        <div class="table-responsive">
+            <table class="table table-striped">
+                <thead>
+                    <tr>
+                        <th>Icon</th>
+                        <th>Name</th>
+                        <th>Color</th>
+                        <th>Expenses</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for cat in categories %}
+                    <tr>
+                        <td class="fs-4">{{ cat.icon }}</td>
+                        <td>
+                            <span class="category-badge"
+                                style="background-color: {{ cat.color }}; color: white; padding: 4px 12px; border-radius: 20px;">
+                                {{ cat.name }}
+                            </span>
+                        </td>
+                        <td>
+                            <span class="color-preview"
+                                style="display: inline-block; width: 24px; height: 24px; border-radius: 4px; background-color: {{ cat.color }}; border: 1px solid #dee2e6;"></span>
+                            <code class="ms-2">{{ cat.color }}</code>
+                        </td>
+                        <td>
+                            <span class="badge bg-secondary">{{ cat.expense_count }}</span>
+                        </td>
+                        <td>
+                            <a href="{{ url_for('edit_category', category_id=cat.id) }}"
+                                class="btn btn-sm btn-outline-primary">Edit</a>
+                            {% if cat.expense_count == 0 %}
+                            <a href="{{ url_for('delete_category', category_id=cat.id) }}"
+                                class="btn btn-sm btn-outline-danger"
+                                onclick="return confirm('Are you sure you want to delete this category?')">Delete</a>
+                            {% else %}
+                            <button class="btn btn-sm btn-outline-secondary" disabled
+                                title="Cannot delete - has {{ cat.expense_count }} expense(s)">Delete</button>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <p class="text-muted">No categories found. <a href="{{ url_for('add_category') }}">Add your first category</a>
+        </p>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

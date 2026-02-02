@@ -79,10 +79,24 @@ def init_db():
         )
     ''')
     
+    # Categories Table (for dynamic category management)
+    conn.execute('''
+        CREATE TABLE IF NOT EXISTS categories (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            name TEXT NOT NULL,
+            icon TEXT DEFAULT '📁',
+            color TEXT DEFAULT '#6c757d',
+            FOREIGN KEY (user_id) REFERENCES users (id),
+            UNIQUE(user_id, name)
+        )
+    ''')
+    
     # Indexes
     conn.execute('CREATE INDEX IF NOT EXISTS idx_expenses_user_date ON expenses(user_id, date)')
     conn.execute('CREATE INDEX IF NOT EXISTS idx_expenses_user_category ON expenses(user_id, category)')
     conn.execute('CREATE INDEX IF NOT EXISTS idx_budgets_user ON budgets(user_id)')
+    conn.execute('CREATE INDEX IF NOT EXISTS idx_categories_user ON categories(user_id)')
     
     conn.commit()
     conn.close()
@@ -119,6 +133,57 @@ def convert_to_usd(amount, currency):
 def convert_from_usd(amount_usd, currency):
     rate = get_usd_rate(currency)
     return round(amount_usd * rate, 2)
+
+# --- CATEGORY HELPERS ---
+
+DEFAULT_CATEGORIES = [
+    ('Food', '🍔', '#28a745'),
+    ('Transportation', '🚗', '#17a2b8'),
+    ('Entertainment', '🎬', '#dc3545'),
+    ('Shopping', '🛒', '#ffc107'),
+    ('Bills', '📄', '#6f42c1'),
+    ('Healthcare', '🏥', '#20c997'),
+    ('Other', '📁', '#6c757d'),
+]
+
+def seed_default_categories(user_id):
+    """Pre-populate default categories for a user if they have none."""
+    conn = get_db_connection()
+    existing = conn.execute('SELECT COUNT(*) FROM categories WHERE user_id = ?', (user_id,)).fetchone()[0]
+    if existing == 0:
+        for name, icon, color in DEFAULT_CATEGORIES:
+            conn.execute(
+                'INSERT INTO categories (user_id, name, icon, color) VALUES (?, ?, ?, ?)',
+                (user_id, name, icon, color)
+            )
+        conn.commit()
+    conn.close()
+
+def get_user_categories(user_id):
+    """Fetch all categories for a user with expense counts."""
+    conn = get_db_connection()
+    categories = conn.execute('''
+        SELECT c.*, COALESCE(e.expense_count, 0) as expense_count
+        FROM categories c
+        LEFT JOIN (
+            SELECT category, COUNT(*) as expense_count 
+            FROM expenses WHERE user_id = ? GROUP BY category
+        ) e ON c.name = e.category
+        WHERE c.user_id = ?
+        ORDER BY c.name
+    ''', (user_id, user_id)).fetchall()
+    conn.close()
+    return categories
+
+def get_category_by_id(category_id, user_id):
+    """Fetch a single category by ID."""
+    conn = get_db_connection()
+    category = conn.execute(
+        'SELECT * FROM categories WHERE id = ? AND user_id = ?',
+        (category_id, user_id)
+    ).fetchone()
+    conn.close()
+    return category
 
 # --- ROUTES ---
 
@@ -171,6 +236,8 @@ def login():
         if user and check_password_hash(user['password'], password):
             session['user_id'] = user['id']
             session['username'] = user['username']
+            # Seed default categories for new users
+            seed_default_categories(user['id'])
             flash('Logged in successfully!')
             return redirect(url_for('dashboard'))
         else:
@@ -182,6 +249,121 @@ def logout():
     session.clear()
     flash('Logged out successfully!')
     return redirect(url_for('index'))
+
+# --- CATEGORY ROUTES ---
+
+@app.route('/categories')
+def categories():
+    if 'user_id' not in session:
+        return redirect(url_for('login'))
+    
+    user_categories = get_user_categories(session['user_id'])
+    return render_template('categories.html', categories=user_categories)
+
+@app.route('/add_category', methods=['GET', 'POST'])
+def add_category():
+    if 'user_id' not in session:
+        return redirect(url_for('login'))
+    
+    if request.method == 'POST':
+        name = request.form['name'].strip()
+        icon = request.form.get('icon', '📁')
+        color = request.form.get('color', '#6c757d')
+        
+        if not name:
+            flash('Category name is required!')
+            return render_template('add_category.html')
+        
+        conn = get_db_connection()
+        try:
+            conn.execute(
+                'INSERT INTO categories (user_id, name, icon, color) VALUES (?, ?, ?, ?)',
+                (session['user_id'], name, icon, color)
+            )
+            conn.commit()
+            flash('Category added successfully!')
+            return redirect(url_for('categories'))
+        except sqlite3.IntegrityError:
+            flash('A category with this name already exists!')
+        finally:
+            conn.close()
+    
+    return render_template('add_category.html')
+
+@app.route('/edit_category/<int:category_id>', methods=['GET', 'POST'])
+def edit_category(category_id):
+    if 'user_id' not in session:
+        return redirect(url_for('login'))
+    
+    category = get_category_by_id(category_id, session['user_id'])
+    if not category:
+        flash('Category not found!')
+        return redirect(url_for('categories'))
+    
+    if request.method == 'POST':
+        name = request.form['name'].strip()
+        icon = request.form.get('icon', category['icon'])
+        color = request.form.get('color', category['color'])
+        
+        if not name:
+            flash('Category name is required!')
+            return render_template('edit_category.html', category=category)
+        
+        conn = get_db_connection()
+        try:
+            # Update category name in expenses if name changed
+            if name != category['name']:
+                conn.execute(
+                    'UPDATE expenses SET category = ? WHERE user_id = ? AND category = ?',
+                    (name, session['user_id'], category['name'])
+                )
+                conn.execute(
+                    'UPDATE budgets SET category = ? WHERE user_id = ? AND category = ?',
+                    (name, session['user_id'], category['name'])
+                )
+            
+            conn.execute(
+                'UPDATE categories SET name = ?, icon = ?, color = ? WHERE id = ? AND user_id = ?',
+                (name, icon, color, category_id, session['user_id'])
+            )
+            conn.commit()
+            flash('Category updated successfully!')
+            return redirect(url_for('categories'))
+        except sqlite3.IntegrityError:
+            flash('A category with this name already exists!')
+        finally:
+            conn.close()
+    
+    return render_template('edit_category.html', category=category)
+
+@app.route('/delete_category/<int:category_id>')
+def delete_category(category_id):
+    if 'user_id' not in session:
+        return redirect(url_for('login'))
+    
+    category = get_category_by_id(category_id, session['user_id'])
+    if not category:
+        flash('Category not found!')
+        return redirect(url_for('categories'))
+    
+    # Check if category has expenses
+    conn = get_db_connection()
+    expense_count = conn.execute(
+        'SELECT COUNT(*) FROM expenses WHERE user_id = ? AND category = ?',
+        (session['user_id'], category['name'])
+    ).fetchone()[0]
+    
+    if expense_count > 0:
+        conn.close()
+        flash(f'Cannot delete "{category["name"]}" - it has {expense_count} expense(s). Please reassign them first.')
+        return redirect(url_for('categories'))
+    
+    conn.execute('DELETE FROM categories WHERE id = ? AND user_id = ?', (category_id, session['user_id']))
+    conn.commit()
+    conn.close()
+    
+    flash('Category deleted successfully!')
+    return redirect(url_for('categories'))
 
 @app.route('/dashboard')
 def dashboard():
@@ -285,10 +467,9 @@ def expenses():
     ).fetchall()
     conn.close()
     
-    # Optional: Convert amounts for display if needed inside template
-    # For now, passing raw list (template handles logic or shows stored value)
-    categories = ['Food', 'Transport', 'Entertainment', 'Shopping', 'Bills', 'Miscellaneous']
-    return render_template('expenses.html', expenses=expenses_list, categories=categories)
+    # Fetch dynamic categories
+    user_categories = get_user_categories(session['user_id'])
+    return render_template('expenses.html', expenses=expenses_list, categories=user_categories)
 
 @app.route('/search_expenses')
 def search_expenses():
@@ -356,8 +537,8 @@ def search_expenses():
     expenses_list = conn.execute(query, params).fetchall()
     conn.close()
     
-    # Categories for the filter dropdown
-    categories = ['Food', 'Transport', 'Entertainment', 'Shopping', 'Bills', 'Miscellaneous']
+    # Fetch dynamic categories for filter dropdown
+    user_categories = get_user_categories(session['user_id'])
     
     # Pass filter values back for form persistence
     filters = {
@@ -371,7 +552,7 @@ def search_expenses():
         'sort_order': sort_order
     }
     
-    return render_template('expenses.html', expenses=expenses_list, categories=categories, filters=filters, is_filtered=True)
+    return render_template('expenses.html', expenses=expenses_list, categories=user_categories, filters=filters, is_filtered=True)
 
 @app.route('/add_expense', methods=['GET', 'POST'])
 def add_expense():
@@ -399,7 +580,8 @@ def add_expense():
         flash('Expense added successfully!')
         return redirect(url_for('expenses'))
     
-    return render_template('add_expense.html')
+    user_categories = get_user_categories(session['user_id'])
+    return render_template('add_expense.html', categories=user_categories)
 
 @app.route('/edit_expense/<int:expense_id>', methods=['GET', 'POST'])
 def edit_expense(expense_id):
@@ -435,7 +617,8 @@ def edit_expense(expense_id):
         flash('Expense not found!')
         return redirect(url_for('expenses'))
 
-    return render_template('edit_expense.html', expense=expense, selected_currency=expense['currency'])
+    user_categories = get_user_categories(session['user_id'])
+    return render_template('edit_expense.html', expense=expense, categories=user_categories, selected_currency=expense['currency'])
 
 # ✅ BUG FIXED HERE: delete_expense (Unreachable code issue resolved)
 @app.route('/delete_expense/<int:expense_id>')
@@ -559,7 +742,8 @@ def add_budget():
         if existing:
             flash('Budget already exists for this category and period!')
             conn.close()
-            return render_template('add_budget.html')
+            user_categories = get_user_categories(session['user_id'])
+            return render_template('add_budget.html', categories=user_categories)
 
         conn.execute(
             '''INSERT INTO budgets (user_id, category, amount, currency, amount_usd, period, start_date)
@@ -570,7 +754,8 @@ def add_budget():
         conn.close()
         flash('Budget added successfully!')
         return redirect(url_for('budgets'))
-    return render_template('add_budget.html')
+    user_categories = get_user_categories(session['user_id'])
+    return render_template('add_budget.html', categories=user_categories)
 
 @app.route('/edit_budget/<int:budget_id>', methods=['GET', 'POST'])
 def edit_budget(budget_id):

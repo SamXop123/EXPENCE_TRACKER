@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -9,20 +10,22 @@
     <link href="https://cdn.jsdelivr.net/npm/tom-select/dist/css/tom-select.css" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/tom-select/dist/js/tom-select.complete.min.js"></script>
 </head>
+
 <body>
     <nav class="navbar navbar-expand-lg navbar-dark bg-dark">
         <div class="container">
             <a class="navbar-brand" href="{{ url_for('dashboard') }}">Expense Tracker</a>
             <div class="navbar-nav ms-auto">
                 {% if session.user_id %}
-                    <a class="nav-link" href="{{ url_for('dashboard') }}">Dashboard</a>
-                    <a class="nav-link" href="{{ url_for('expenses') }}">Expenses</a>
-                    <a class="nav-link" href="{{ url_for('budgets') }}">Budgets</a>
-                    <a class="nav-link" href="{{ url_for('analytics') }}">Analytics</a>
-                    <a class="nav-link" href="{{ url_for('logout') }}">Logout</a>
+                <a class="nav-link" href="{{ url_for('dashboard') }}">Dashboard</a>
+                <a class="nav-link" href="{{ url_for('expenses') }}">Expenses</a>
+                <a class="nav-link" href="{{ url_for('budgets') }}">Budgets</a>
+                <a class="nav-link" href="{{ url_for('analytics') }}">Analytics</a>
+                <a class="nav-link" href="{{ url_for('categories') }}">Categories</a>
+                <a class="nav-link" href="{{ url_for('logout') }}">Logout</a>
                 {% else %}
-                    <a class="nav-link" href="{{ url_for('login') }}">Login</a>
-                    <a class="nav-link" href="{{ url_for('signup') }}">Sign Up</a>
+                <a class="nav-link" href="{{ url_for('login') }}">Login</a>
+                <a class="nav-link" href="{{ url_for('signup') }}">Sign Up</a>
                 {% endif %}
             </div>
         </div>
@@ -30,14 +33,14 @@
 
     <div class="container mt-4">
         {% with messages = get_flashed_messages() %}
-            {% if messages %}
-                {% for message in messages %}
-                    <div class="alert alert-info alert-dismissible fade show" role="alert">
-                        {{ message }}
-                        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-                    </div>
-                {% endfor %}
-            {% endif %}
+        {% if messages %}
+        {% for message in messages %}
+        <div class="alert alert-info alert-dismissible fade show" role="alert">
+            {{ message }}
+            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+        </div>
+        {% endfor %}
+        {% endif %}
         {% endwith %}
 
         {% block content %}{% endblock %}
@@ -47,4 +50,5 @@
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     {% block scripts %}{% endblock %}
 </body>
+
 </html>

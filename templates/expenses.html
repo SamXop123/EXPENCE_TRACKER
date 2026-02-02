@@ -51,8 +51,8 @@
                         <label for="categories" class="form-label">Categories</label>
                         <select id="categoriesSelect" multiple placeholder="Select categories...">
                             {% for cat in categories %}
-                            <option value="{{ cat }}" {% if filters and cat in (filters.categories or '' ).split(',')
-                                %}selected{% endif %}>{{ cat }}</option>
+                            <option value="{{ cat.name }}" {% if filters and cat.name in (filters.categories or ''
+                                ).split(',') %}selected{% endif %}>{{ cat.icon }} {{ cat.name }}</option>
                             {% endfor %}
                         </select>
                         <input type="hidden" id="categories" name="categories"
@@ -132,9 +132,9 @@
                     Update Category
                 </button>
                 <ul class="dropdown-menu">
-                    {% set categories = ['Food', 'Transport', 'Entertainment', 'Shopping', 'Bills', 'Miscellaneous'] %}
                     {% for cat in categories %}
-                    <li><a class="dropdown-item bulk-update-cat" href="#" data-category="{{ cat }}">{{ cat }}</a></li>
+                    <li><a class="dropdown-item bulk-update-cat" href="#" data-category="{{ cat.name }}">{{ cat.icon }}
+                            {{ cat.name }}</a></li>
                     {% endfor %}
                 </ul>
             </div>
@@ -156,7 +156,17 @@
                     <tr>
                         <td><input type="checkbox" class="expense-checkbox" value="{{ expense['id'] }}"></td>
                         <td>{{ expense['date'] }}</td>
-                        <td>{{ expense['category'] }}</td>
+                        <td>
+                            {% set cat_match = categories|selectattr('name', 'equalto', expense['category'])|first %}
+                            {% if cat_match %}
+                            <span class="category-badge"
+                                style="background-color: {{ cat_match.color }}; color: white; padding: 2px 8px; border-radius: 12px;">
+                                {{ cat_match.icon }} {{ expense['category'] }}
+                            </span>
+                            {% else %}
+                            {{ expense['category'] }}
+                            {% endif %}
+                        </td>
                         <td>{{ expense['description'] or '-' }}</td>
                         <td>{{ expense['currency'] }} {{ "%.2f"|format(expense['amount']) }}</td>
                         <td>

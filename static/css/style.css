@@ -177,7 +177,69 @@ body {
         padding: 0.6rem;
     }
 
-    .search-form-container .row > div {
+    .search-form-container .row>div {
         margin-bottom: 0.5rem;
     }
+}
+
+/* Category Icon Picker */
+.icon-picker {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 10px;
+    background-color: #f8f9fa;
+    border-radius: 8px;
+    border: 1px solid #dee2e6;
+}
+
+.icon-btn {
+    width: 40px;
+    height: 40px;
+    border: 2px solid transparent;
+    border-radius: 8px;
+    background: white;
+    cursor: pointer;
+    font-size: 1.25rem;
+    transition: all 0.2s ease;
+}
+
+.icon-btn:hover {
+    border-color: #0d6efd;
+    transform: scale(1.1);
+}
+
+.icon-btn.active {
+    border-color: #0d6efd;
+    background-color: #e7f1ff;
+}
+
+/* Color Picker Presets */
+.color-presets {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+}
+
+.color-preset-btn {
+    width: 28px;
+    height: 28px;
+    border: 2px solid transparent;
+    border-radius: 50%;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.color-preset-btn:hover {
+    transform: scale(1.15);
+    border-color: rgba(0, 0, 0, 0.3);
+}
+
+/* Category Badge */
+.category-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-weight: 500;
+    white-space: nowrap;
 }
