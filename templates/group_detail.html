@@ -3,8 +3,18 @@
 {% block content %}
 <div class="container py-4">
     <div class="d-flex justify-content-between align-items-center mb-4">
-        <h2>{{ group.name }}</h2>
-        <a href="{{ url_for('groups') }}" class="btn btn-outline-secondary">&larr; Back</a>
+        <div>
+            <h2>{{ group.name }}</h2>
+            <small class="text-muted">Created by <strong>{{ creator_username }}</strong></small>
+        </div>
+        <div class="d-flex gap-2">
+            <a href="{{ url_for('groups') }}" class="btn btn-outline-secondary">&larr; Back</a>
+            {% if group.created_by == session.get('user_id') %}
+            <form action="{{ url_for('delete_group', group_id=group.id) }}" method="POST" class="d-inline" onsubmit="return confirm('Delete this group and all its data?');">
+                <button type="submit" class="btn btn-outline-danger"><i class="fas fa-trash"></i> Delete Group</button>
+            </form>
+            {% endif %}
+        </div>
     </div>
 
     <div class="row g-4">
@@ -40,17 +50,24 @@
                 <div class="card-header bg-white fw-bold">Recent Activity</div>
                 <ul class="list-group list-group-flush">
                     {% for exp in expenses %}
-                    <li class="list-group-item d-flex justify-content-between align-items-center {% if exp.description == 'Settlement' %}bg-light{% endif %}">
-                        <div>
+                    <li class="list-group-item d-flex justify-content-between align-items-start {% if exp.description == 'Settlement' %}bg-light{% endif %}">
+                        <div class="flex-grow-1">
                             {% if exp.description == 'Settlement' %}
                                 <span class="badge bg-success me-2">PAYMENT</span>
                                 <strong>{{ exp.payer_name }}</strong> paid
                             {% else %}
                                 <strong>{{ exp.description }}</strong>
-                                <div class="text-muted small">Paid by {{ exp.payer_name }}</div>
+                                <div class="text-muted small">Paid by {{ exp.payer_name }} • {{ exp.date }}</div>
                             {% endif %}
                         </div>
-                        <span class="fw-bold">₹{{ exp.amount }}</span>
+                        <div class="text-end">
+                            <div class="fw-bold">₹{{ exp.amount }}</div>
+                            {% if exp.payer_id == session.get('user_id') or group.created_by == session.get('user_id') %}
+                            <form action="{{ url_for('delete_group_expense', group_id=group.id, expense_id=exp.id) }}" method="POST" class="d-inline mt-2" onsubmit="return confirm('Delete this expense?');">
+                                <button type="submit" class="btn btn-sm btn-outline-danger"><i class="fas fa-trash"></i></button>
+                            </form>
+                            {% endif %}
+                        </div>
                     </li>
                     {% endfor %}
                 </ul>

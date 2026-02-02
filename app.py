@@ -1044,6 +1044,10 @@ def group_detail(group_id):
     
     group = conn.execute('SELECT * FROM groups WHERE id = ?', (group_id,)).fetchone()
     
+    # Get Creator Username
+    creator = conn.execute('SELECT username FROM users WHERE id = ?', (group['created_by'],)).fetchone()
+    creator_username = creator['username'] if creator else 'Unknown'
+    
     # Get Expenses
     expenses = conn.execute('''
         SELECT ge.*, u.username as payer_name 
@@ -1063,7 +1067,7 @@ def group_detail(group_id):
     conn.close()
     
     debts = calculate_group_debts(group_id)
-    return render_template('group_detail.html', group=group, expenses=expenses, members=members, debts=debts)
+    return render_template('group_detail.html', group=group, expenses=expenses, members=members, debts=debts, creator_username=creator_username)
 
 @app.route('/group/<int:group_id>/add_member', methods=['POST'])
 def add_member(group_id):
@@ -1156,6 +1160,63 @@ def settle_up(group_id):
     conn.close()
     
     flash('Payment recorded!')
+    return redirect(url_for('group_detail', group_id=group_id))
+
+@app.route('/group/<int:group_id>/delete', methods=['POST'])
+def delete_group(group_id):
+    if 'user_id' not in session: 
+        return redirect(url_for('login'))
+    
+    conn = get_db_connection()
+    
+    # Check if user is creator/admin of the group
+    group = conn.execute('SELECT created_by FROM groups WHERE id = ?', (group_id,)).fetchone()
+    
+    if not group or group['created_by'] != session['user_id']:
+        flash('Only the group creator can delete this group.')
+        conn.close()
+        return redirect(url_for('group_detail', group_id=group_id))
+    
+    # Delete cascade
+    conn.execute('DELETE FROM expense_splits WHERE expense_id IN (SELECT id FROM group_expenses WHERE group_id = ?)', (group_id,))
+    conn.execute('DELETE FROM group_expenses WHERE group_id = ?', (group_id,))
+    conn.execute('DELETE FROM group_members WHERE group_id = ?', (group_id,))
+    conn.execute('DELETE FROM groups WHERE id = ?', (group_id,))
+    conn.commit()
+    conn.close()
+    
+    flash('Group deleted successfully!')
+    return redirect(url_for('groups'))
+
+@app.route('/group/<int:group_id>/expense/<int:expense_id>/delete', methods=['POST'])
+def delete_group_expense(group_id, expense_id):
+    if 'user_id' not in session: 
+        return redirect(url_for('login'))
+    
+    conn = get_db_connection()
+    
+    # Check if expense belongs to group and user is creator or payer
+    expense = conn.execute('SELECT group_id, payer_id FROM group_expenses WHERE id = ?', (expense_id,)).fetchone()
+    
+    if not expense or expense['group_id'] != group_id:
+        flash('Expense not found.')
+        conn.close()
+        return redirect(url_for('group_detail', group_id=group_id))
+    
+    if expense['payer_id'] != session['user_id']:
+        group = conn.execute('SELECT created_by FROM groups WHERE id = ?', (group_id,)).fetchone()
+        if group['created_by'] != session['user_id']:
+            flash('Only the payer or group creator can delete this expense.')
+            conn.close()
+            return redirect(url_for('group_detail', group_id=group_id))
+    
+    # Delete expense and splits
+    conn.execute('DELETE FROM expense_splits WHERE expense_id = ?', (expense_id,))
+    conn.execute('DELETE FROM group_expenses WHERE id = ?', (expense_id,))
+    conn.commit()
+    conn.close()
+    
+    flash('Expense deleted successfully!')
     return redirect(url_for('group_detail', group_id=group_id))
 # ================= CHATBOT =================
 
