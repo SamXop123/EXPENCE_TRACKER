@@ -17,12 +17,12 @@
             <a class="navbar-brand" href="{{ url_for('dashboard') }}">Expense Tracker</a>
             <div class="navbar-nav ms-auto">
                 {% if session.user_id %}
-                <a class="nav-link" href="{{ url_for('dashboard') }}">Dashboard</a>
-                <a class="nav-link" href="{{ url_for('expenses') }}">Expenses</a>
-                <a class="nav-link" href="{{ url_for('budgets') }}">Budgets</a>
-                <a class="nav-link" href="{{ url_for('analytics') }}">Analytics</a>
-                <a class="nav-link" href="{{ url_for('categories') }}">Categories</a>
-                <a class="nav-link" href="{{ url_for('logout') }}">Logout</a>
+                    <a class="nav-link" href="{{ url_for('dashboard') }}">Dashboard</a>
+                    <a class="nav-link" href="{{ url_for('expenses') }}">Expenses</a>
+                    <a class="nav-link" href="{{ url_for('budgets') }}">Budgets</a>
+                    <a class="nav-link" href="{{ url_for('analytics') }}">Analytics</a>
+                    <a class="nav-link" href="{{ url_for('groups') }}">Split-Wise</a>
+                    <a class="nav-link" href="{{ url_for('logout') }}">Logout</a>
                 {% else %}
                 <a class="nav-link" href="{{ url_for('login') }}">Login</a>
                 <a class="nav-link" href="{{ url_for('signup') }}">Sign Up</a>

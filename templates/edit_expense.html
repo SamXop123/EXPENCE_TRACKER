@@ -34,11 +34,16 @@
 
                     <div class="mb-3">
                         <label for="currency" class="form-label">Currency</label>
-                        <select class="form-select" id="currency" name="currency" required>
-                            <option value="INR" {% if expense['currency']=='INR' %}selected{% endif %}>INR</option>
-                            <option value="USD" {% if expense['currency']=='USD' %}selected{% endif %}>USD</option>
-                            <option value="EUR" {% if expense['currency']=='EUR' %}selected{% endif %}>EUR</option>
-                            <option value="GBP" {% if expense['currency']=='GBP' %}selected{% endif %}>GBP</option>
+                        <select
+                            class="form-select"
+                            id="currency"
+                            name="currency"
+                            required
+                        >
+                            <option value="INR" {% if selected_currency == 'INR' %}selected{% endif %}>INR</option>
+                            <option value="USD" {% if selected_currency == 'USD' %}selected{% endif %}>USD</option>
+                            <option value="EUR" {% if selected_currency == 'EUR' %}selected{% endif %}>EUR</option>
+                            <option value="GBP" {% if selected_currency == 'GBP' %}selected{% endif %}>GBP</option>
                         </select>
                     </div>
 

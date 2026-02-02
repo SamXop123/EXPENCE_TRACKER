@@ -98,6 +98,51 @@ def init_db():
     conn.execute('CREATE INDEX IF NOT EXISTS idx_budgets_user ON budgets(user_id)')
     conn.execute('CREATE INDEX IF NOT EXISTS idx_categories_user ON categories(user_id)')
     
+    # --- NEW SPLITWISE TABLES ---
+    conn.execute('''
+        CREATE TABLE IF NOT EXISTS groups (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            created_by INTEGER NOT NULL,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (created_by) REFERENCES users (id)
+        )
+    ''')
+    
+    conn.execute('''
+        CREATE TABLE IF NOT EXISTS group_members (
+            group_id INTEGER NOT NULL,
+            user_id INTEGER NOT NULL,
+            joined_at TEXT NOT NULL,
+            FOREIGN KEY (group_id) REFERENCES groups (id),
+            FOREIGN KEY (user_id) REFERENCES users (id),
+            PRIMARY KEY (group_id, user_id)
+        )
+    ''')
+    
+    conn.execute('''
+        CREATE TABLE IF NOT EXISTS group_expenses (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            group_id INTEGER NOT NULL,
+            payer_id INTEGER NOT NULL,
+            amount REAL NOT NULL,
+            description TEXT NOT NULL,
+            date TEXT NOT NULL,
+            FOREIGN KEY (group_id) REFERENCES groups (id),
+            FOREIGN KEY (payer_id) REFERENCES users (id)
+        )
+    ''')
+    
+    conn.execute('''
+        CREATE TABLE IF NOT EXISTS expense_splits (
+            expense_id INTEGER NOT NULL,
+            user_id INTEGER NOT NULL,
+            amount_owed REAL NOT NULL,
+            FOREIGN KEY (expense_id) REFERENCES group_expenses (id),
+            FOREIGN KEY (user_id) REFERENCES users (id)
+        )
+    ''')
+    
     conn.commit()
     conn.close()
 
@@ -134,56 +179,88 @@ def convert_from_usd(amount_usd, currency):
     rate = get_usd_rate(currency)
     return round(amount_usd * rate, 2)
 
-# --- CATEGORY HELPERS ---
-
-DEFAULT_CATEGORIES = [
-    ('Food', '🍔', '#28a745'),
-    ('Transportation', '🚗', '#17a2b8'),
-    ('Entertainment', '🎬', '#dc3545'),
-    ('Shopping', '🛒', '#ffc107'),
-    ('Bills', '📄', '#6f42c1'),
-    ('Healthcare', '🏥', '#20c997'),
-    ('Other', '📁', '#6c757d'),
-]
-
-def seed_default_categories(user_id):
-    """Pre-populate default categories for a user if they have none."""
+# --- NEW HELPER: SPLITWISE DEBT ALGORITHM ---
+def calculate_group_debts(group_id):
+    """Calculates who owes whom, handling settlements/partial payments."""
     conn = get_db_connection()
-    existing = conn.execute('SELECT COUNT(*) FROM categories WHERE user_id = ?', (user_id,)).fetchone()[0]
-    if existing == 0:
-        for name, icon, color in DEFAULT_CATEGORIES:
-            conn.execute(
-                'INSERT INTO categories (user_id, name, icon, color) VALUES (?, ?, ?, ?)',
-                (user_id, name, icon, color)
-            )
-        conn.commit()
+    
+    # 1. Get Members
+    members = conn.execute(
+        "SELECT user_id, username FROM group_members JOIN users ON users.id = group_members.user_id WHERE group_id = ?", 
+        (group_id,)
+    ).fetchall()
+    
+    user_map = {row['user_id']: row['username'] for row in members}
+    balances = {row['user_id']: 0.0 for row in members}
+    
+    # 2. Calculate Balances
+    expenses = conn.execute("SELECT * FROM group_expenses WHERE group_id = ?", (group_id,)).fetchall()
+    
+    for exp in expenses:
+        # HANDLE SETTLEMENTS (The "Done Box" payments)
+        if exp['description'] == 'Settlement':
+            # In a settlement, the Payer (Debtor) is paying the Split User (Creditor)
+            # We need to find who this payment was sent TO
+            splits = conn.execute("SELECT user_id FROM expense_splits WHERE expense_id = ?", (exp['id'],)).fetchall()
+            if splits:
+                receiver_id = splits[0]['user_id']
+                # Payer (Debtor) gave money, so their balance increases (becomes less negative)
+                if exp['payer_id'] in balances:
+                    balances[exp['payer_id']] += exp['amount']
+                # Receiver (Creditor) got money, so their balance decreases (becomes less positive/owed)
+                if receiver_id in balances:
+                    balances[receiver_id] -= exp['amount']
+        # HANDLE NORMAL EXPENSES
+        else:
+            # Payer gets credit (+)
+            if exp['payer_id'] in balances:
+                balances[exp['payer_id']] += exp['amount']
+            
+            # Splitters get debit (-)
+            splits = conn.execute("SELECT user_id, amount_owed FROM expense_splits WHERE expense_id = ?", (exp['id'],)).fetchall()
+            for split in splits:
+                if split['user_id'] in balances:
+                    balances[split['user_id']] -= split['amount_owed']
+    
+    # 3. Minimize Transactions
+    debtors = []
+    creditors = []
+    for uid, amount in balances.items():
+        if amount < -0.01: 
+            debtors.append({'id': uid, 'amount': amount})
+        if amount > 0.01: 
+            creditors.append({'id': uid, 'amount': amount})
+    
+    debtors.sort(key=lambda x: x['amount'])
+    creditors.sort(key=lambda x: x['amount'], reverse=True)
+    
+    transactions = []
+    d_idx = 0
+    c_idx = 0
+    
+    while d_idx < len(debtors) and c_idx < len(creditors):
+        debtor = debtors[d_idx]
+        creditor = creditors[c_idx]
+        amount = min(abs(debtor['amount']), creditor['amount'])
+        
+        transactions.append({
+            'from_id': debtor['id'],
+            'to_id': creditor['id'],
+            'from': user_map.get(debtor['id'], 'Unknown'),
+            'to': user_map.get(creditor['id'], 'Unknown'),
+            'amount': round(amount, 2)
+        })
+        
+        debtor['amount'] += amount
+        creditor['amount'] -= amount
+        
+        if abs(debtor['amount']) < 0.01: 
+            d_idx += 1
+        if creditor['amount'] < 0.01: 
+            c_idx += 1
+    
     conn.close()
-
-def get_user_categories(user_id):
-    """Fetch all categories for a user with expense counts."""
-    conn = get_db_connection()
-    categories = conn.execute('''
-        SELECT c.*, COALESCE(e.expense_count, 0) as expense_count
-        FROM categories c
-        LEFT JOIN (
-            SELECT category, COUNT(*) as expense_count 
-            FROM expenses WHERE user_id = ? GROUP BY category
-        ) e ON c.name = e.category
-        WHERE c.user_id = ?
-        ORDER BY c.name
-    ''', (user_id, user_id)).fetchall()
-    conn.close()
-    return categories
-
-def get_category_by_id(category_id, user_id):
-    """Fetch a single category by ID."""
-    conn = get_db_connection()
-    category = conn.execute(
-        'SELECT * FROM categories WHERE id = ? AND user_id = ?',
-        (category_id, user_id)
-    ).fetchone()
-    conn.close()
-    return category
+    return transactions
 
 # --- ROUTES ---
 
@@ -467,9 +544,8 @@ def expenses():
     ).fetchall()
     conn.close()
     
-    # Fetch dynamic categories
-    user_categories = get_user_categories(session['user_id'])
-    return render_template('expenses.html', expenses=expenses_list, categories=user_categories)
+    categories = ['Food', 'Transportation', 'Entertainment', 'Shopping', 'Bills', 'Healthcare', 'Other']
+    return render_template('expenses.html', expenses=expenses_list, categories=categories)
 
 @app.route('/search_expenses')
 def search_expenses():
@@ -537,8 +613,8 @@ def search_expenses():
     expenses_list = conn.execute(query, params).fetchall()
     conn.close()
     
-    # Fetch dynamic categories for filter dropdown
-    user_categories = get_user_categories(session['user_id'])
+    # Categories for the filter dropdown
+    categories = ['Food', 'Transportation', 'Entertainment', 'Shopping', 'Bills', 'Healthcare', 'Other']
     
     # Pass filter values back for form persistence
     filters = {
@@ -1045,6 +1121,179 @@ def chatbot():
     except Exception as e:
         print(e)
         return {"reply": "AI service error. Try again later."}
+
+# ================= NEW: SPLITWISE FEATURES =================
+
+@app.route('/groups')
+def groups():
+    if 'user_id' not in session: 
+        return redirect(url_for('login'))
+    
+    conn = get_db_connection()
+    user_groups = conn.execute('''
+        SELECT g.id, g.name, COUNT(m.user_id) as member_count 
+        FROM groups g
+        JOIN group_members m ON g.id = m.group_id
+        WHERE m.user_id = ?
+        GROUP BY g.id
+    ''', (session['user_id'],)).fetchall()
+    conn.close()
+    
+    return render_template('groups.html', groups=user_groups)
+
+@app.route('/create_group', methods=['POST'])
+def create_group():
+    if 'user_id' not in session: 
+        return redirect(url_for('login'))
+    
+    group_name = request.form['name']
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    cursor.execute('INSERT INTO groups (name, created_by, created_at) VALUES (?, ?, ?)',
+                   (group_name, session['user_id'], datetime.now()))
+    group_id = cursor.lastrowid
+    
+    # Add creator as first member
+    cursor.execute('INSERT INTO group_members (group_id, user_id, joined_at) VALUES (?, ?, ?)',
+                   (group_id, session['user_id'], datetime.now()))
+    conn.commit()
+    conn.close()
+    
+    return redirect(url_for('group_detail', group_id=group_id))
+
+@app.route('/group/<int:group_id>')
+def group_detail(group_id):
+    if 'user_id' not in session: 
+        return redirect(url_for('login'))
+    
+    conn = get_db_connection()
+    
+    # Access Control
+    is_member = conn.execute('SELECT 1 FROM group_members WHERE group_id = ? AND user_id = ?',
+                              (group_id, session['user_id'])).fetchone()
+    if not is_member:
+        conn.close()
+        flash("You are not a member of this group.")
+        return redirect(url_for('groups'))
+    
+    group = conn.execute('SELECT * FROM groups WHERE id = ?', (group_id,)).fetchone()
+    
+    # Get Expenses
+    expenses = conn.execute('''
+        SELECT ge.*, u.username as payer_name 
+        FROM group_expenses ge 
+        JOIN users u ON ge.payer_id = u.id 
+        WHERE group_id = ? ORDER BY date DESC
+    ''', (group_id,)).fetchall()
+    
+    # Get Members (For 'Paid By' list)
+    members = conn.execute('''
+        SELECT u.id, u.username, u.email 
+        FROM group_members gm 
+        JOIN users u ON gm.user_id = u.id 
+        WHERE group_id = ?
+    ''', (group_id,)).fetchall()
+    
+    conn.close()
+    
+    debts = calculate_group_debts(group_id)
+    return render_template('group_detail.html', group=group, expenses=expenses, members=members, debts=debts)
+
+@app.route('/group/<int:group_id>/add_member', methods=['POST'])
+def add_member(group_id):
+    if 'user_id' not in session: 
+        return redirect(url_for('login'))
+    
+    username = request.form['username']
+    conn = get_db_connection()
+    
+    # NEW LOGIC: Check by username. If not exists, CREATE IT.
+    user = conn.execute('SELECT id FROM users WHERE username = ?', (username,)).fetchone()
+    
+    if not user:
+        # Create "Ghost" user automatically so we can add them to the bill
+        # Using a timestamp to ensure unique email
+        dummy_email = f"{username}_{int(time.time())}@placeholder.com"
+        dummy_pass = generate_password_hash("placeholder") # They can't login, which is fine
+        c = conn.cursor()
+        c.execute('INSERT INTO users (username, email, password) VALUES (?, ?, ?)', (username, dummy_email, dummy_pass))
+        user_id = c.lastrowid
+        conn.commit()
+        flash(f'Created new user "{username}" and added to group!')
+    else:
+        user_id = user['id']
+        flash(f'Added "{username}" to group!')
+    
+    # Add to group
+    try:
+        conn.execute('INSERT INTO group_members (group_id, user_id, joined_at) VALUES (?, ?, ?)',
+                     (group_id, user_id, datetime.now()))
+        conn.commit()
+    except sqlite3.IntegrityError:
+        flash('User already in group.')
+    
+    conn.close()
+    return redirect(url_for('group_detail', group_id=group_id))
+
+@app.route('/group/<int:group_id>/add_expense', methods=['POST'])
+def add_group_expense(group_id):
+    if 'user_id' not in session: 
+        return redirect(url_for('login'))
+    
+    amount = float(request.form['amount'])
+    desc = request.form['description']
+    payer_id = int(request.form['payer_id']) # Now we use the ID from the dropdown
+    
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    # Insert Expense
+    cursor.execute('INSERT INTO group_expenses (group_id, payer_id, amount, description, date) VALUES (?, ?, ?, ?, ?)',
+                    (group_id, payer_id, amount, desc, datetime.now()))
+    expense_id = cursor.lastrowid
+    
+    # Split equally among ALL members
+    members = conn.execute('SELECT user_id FROM group_members WHERE group_id = ?', (group_id,)).fetchall()
+    if members:
+        split = amount / len(members)
+        for m in members:
+            conn.execute('INSERT INTO expense_splits (expense_id, user_id, amount_owed) VALUES (?, ?, ?)',
+                         (expense_id, m['user_id'], split))
+        conn.commit()
+    
+    conn.close()
+    return redirect(url_for('group_detail', group_id=group_id))
+
+@app.route('/group/<int:group_id>/settle_up', methods=['POST'])
+def settle_up(group_id):
+    if 'user_id' not in session: 
+        return redirect(url_for('login'))
+    
+    payer_id = int(request.form['from_id']) # Debtor
+    receiver_id = int(request.form['to_id']) # Creditor
+    amount = float(request.form['amount']) # Partial or Full amount
+    
+    conn = get_db_connection()
+    c = conn.cursor()
+    
+    # Record Settlement as an Expense (Payer = Debtor)
+    c.execute('INSERT INTO group_expenses (group_id, payer_id, amount, description, date) VALUES (?, ?, ?, ?, ?)',
+              (group_id, payer_id, amount, "Settlement", datetime.now()))
+    exp_id = c.lastrowid
+    
+    # Assign the split fully to the Receiver (Creditor)
+    # Math: Debtor Paid (+balance), Creditor Received (-balance)
+    c.execute('INSERT INTO expense_splits (expense_id, user_id, amount_owed) VALUES (?, ?, ?)',
+              (exp_id, receiver_id, amount))
+    
+    conn.commit()
+    conn.close()
+    
+    flash('Payment recorded!')
+    return redirect(url_for('group_detail', group_id=group_id))
+# ================= CHATBOT =================
+
 
 if __name__ == '__main__':
     init_db()

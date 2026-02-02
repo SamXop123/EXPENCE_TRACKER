@@ -7,17 +7,13 @@
         <a href="{{ url_for('add_expense') }}" class="btn btn-primary">Add Expense</a>
         <a href="{{ url_for('import_expenses') }}" class="btn btn-outline-primary">Import CSV</a>
         <div class="dropdown d-inline-block ms-2">
-            <button class="btn btn-secondary dropdown-toggle" type="button" id="exportDropdown"
-                data-bs-toggle="dropdown" aria-expanded="false">
+            <button class="btn btn-secondary dropdown-toggle" type="button" id="exportDropdown" data-bs-toggle="dropdown" aria-expanded="false">
                 Export
             </button>
             <ul class="dropdown-menu" aria-labelledby="exportDropdown">
-                <li><a class="dropdown-item"
-                        href="{{ url_for('export_data', data_type='expenses', format='csv') }}">CSV</a></li>
-                <li><a class="dropdown-item"
-                        href="{{ url_for('export_data', data_type='expenses', format='xlsx') }}">Excel</a></li>
-                <li><a class="dropdown-item"
-                        href="{{ url_for('export_data', data_type='expenses', format='pdf') }}">PDF</a></li>
+                <li><a class="dropdown-item" href="{{ url_for('export_data', data_type='expenses', format='csv') }}">CSV</a></li>
+                <li><a class="dropdown-item" href="{{ url_for('export_data', data_type='expenses', format='xlsx') }}">Excel</a></li>
+                <li><a class="dropdown-item" href="{{ url_for('export_data', data_type='expenses', format='pdf') }}">PDF</a></li>
             </ul>
         </div>
     </div>
@@ -25,8 +21,7 @@
 
 <!-- Search & Filter Form -->
 <div class="card mb-4 search-form-container">
-    <div class="card-header d-flex justify-content-between align-items-center" style="cursor: pointer;"
-        data-bs-toggle="collapse" data-bs-target="#searchFormCollapse">
+    <div class="card-header d-flex justify-content-between align-items-center" style="cursor: pointer;" data-bs-toggle="collapse" data-bs-target="#searchFormCollapse">
         <span><i class="search-icon">🔍</i> Search & Filter Expenses</span>
         <span class="collapse-indicator">▼</span>
     </div>
@@ -37,69 +32,52 @@
                     <!-- Date Range -->
                     <div class="col-md-3">
                         <label for="date_from" class="form-label">From Date</label>
-                        <input type="date" class="form-control" id="date_from" name="date_from"
-                            value="{{ filters.date_from if filters else '' }}">
+                        <input type="date" class="form-control" id="date_from" name="date_from" value="{{ filters.date_from if filters else '' }}">
                     </div>
                     <div class="col-md-3">
                         <label for="date_to" class="form-label">To Date</label>
-                        <input type="date" class="form-control" id="date_to" name="date_to"
-                            value="{{ filters.date_to if filters else '' }}">
+                        <input type="date" class="form-control" id="date_to" name="date_to" value="{{ filters.date_to if filters else '' }}">
                     </div>
-
                     <!-- Categories Multi-select -->
                     <div class="col-md-6">
                         <label for="categories" class="form-label">Categories</label>
                         <select id="categoriesSelect" multiple placeholder="Select categories...">
                             {% for cat in categories %}
-                            <option value="{{ cat.name }}" {% if filters and cat.name in (filters.categories or ''
-                                ).split(',') %}selected{% endif %}>{{ cat.icon }} {{ cat.name }}</option>
+                            <option value="{{ cat }}" {% if filters and cat in (filters.categories or '' ).split(',') %}selected{% endif %}>{{ cat }}</option>
                             {% endfor %}
                         </select>
-                        <input type="hidden" id="categories" name="categories"
-                            value="{{ filters.categories if filters else '' }}">
+                        <input type="hidden" id="categories" name="categories" value="{{ filters.categories if filters else '' }}">
                     </div>
-
                     <!-- Amount Range -->
                     <div class="col-md-3">
                         <label for="amount_min" class="form-label">Min Amount</label>
-                        <input type="number" class="form-control" id="amount_min" name="amount_min" step="0.01" min="0"
-                            placeholder="0.00" value="{{ filters.amount_min if filters else '' }}">
+                        <input type="number" class="form-control" id="amount_min" name="amount_min" step="0.01" min="0" placeholder="0.00" value="{{ filters.amount_min if filters else '' }}">
                     </div>
                     <div class="col-md-3">
                         <label for="amount_max" class="form-label">Max Amount</label>
-                        <input type="number" class="form-control" id="amount_max" name="amount_max" step="0.01" min="0"
-                            placeholder="0.00" value="{{ filters.amount_max if filters else '' }}">
+                        <input type="number" class="form-control" id="amount_max" name="amount_max" step="0.01" min="0" placeholder="0.00" value="{{ filters.amount_max if filters else '' }}">
                     </div>
-
                     <!-- Keyword Search -->
                     <div class="col-md-6">
                         <label for="keyword" class="form-label">Search Description</label>
-                        <input type="text" class="form-control" id="keyword" name="keyword"
-                            placeholder="Enter keyword..." value="{{ filters.keyword if filters else '' }}">
+                        <input type="text" class="form-control" id="keyword" name="keyword" placeholder="Enter keyword..." value="{{ filters.keyword if filters else '' }}">
                     </div>
-
                     <!-- Sort Options -->
                     <div class="col-md-3">
                         <label for="sort_by" class="form-label">Sort By</label>
                         <select class="form-select" id="sort_by" name="sort_by">
-                            <option value="date" {% if filters and filters.sort_by=='date' %}selected{% endif %}>Date
-                            </option>
-                            <option value="amount" {% if filters and filters.sort_by=='amount' %}selected{% endif %}>
-                                Amount</option>
-                            <option value="category" {% if filters and filters.sort_by=='category' %}selected{% endif
-                                %}>Category</option>
+                            <option value="date" {% if filters and filters.sort_by=='date' %}selected{% endif %}>Date</option>
+                            <option value="amount" {% if filters and filters.sort_by=='amount' %}selected{% endif %}>Amount</option>
+                            <option value="category" {% if filters and filters.sort_by=='category' %}selected{% endif %}>Category</option>
                         </select>
                     </div>
                     <div class="col-md-3">
                         <label for="sort_order" class="form-label">Order</label>
                         <select class="form-select" id="sort_order" name="sort_order">
-                            <option value="desc" {% if filters and filters.sort_order=='desc' %}selected{% endif %}>
-                                Descending</option>
-                            <option value="asc" {% if filters and filters.sort_order=='asc' %}selected{% endif %}>
-                                Ascending</option>
+                            <option value="desc" {% if filters and filters.sort_order=='desc' %}selected{% endif %}>Descending</option>
+                            <option value="asc" {% if filters and filters.sort_order=='asc' %}selected{% endif %}>Ascending</option>
                         </select>
                     </div>
-
                     <!-- Action Buttons -->
                     <div class="col-md-6 d-flex align-items-end gap-2">
                         <button type="submit" class="btn btn-primary">
@@ -170,11 +148,8 @@
                         <td>{{ expense['description'] or '-' }}</td>
                         <td>{{ expense['currency'] }} {{ "%.2f"|format(expense['amount']) }}</td>
                         <td>
-                            <a href="{{ url_for('edit_expense', expense_id=expense['id']) }}"
-                                class="btn btn-sm btn-outline-primary">Edit</a>
-                            <a href="{{ url_for('delete_expense', expense_id=expense['id']) }}"
-                                class="btn btn-sm btn-outline-danger"
-                                onclick="return confirm('Are you sure?')">Delete</a>
+                            <a href="{{ url_for('edit_expense', expense_id=expense['id']) }}" class="btn btn-sm btn-outline-primary">Edit</a>
+                            <a href="{{ url_for('delete_expense', expense_id=expense['id']) }}" class="btn btn-sm btn-outline-danger" onclick="return confirm('Are you sure?')">Delete</a>
                         </td>
                     </tr>
                     {% endfor %}
@@ -188,88 +163,88 @@
 </div>
 
 <script>
-    document.addEventListener('DOMContentLoaded', function () {
-        const selectAll = document.getElementById('selectAll');
-        const checkboxes = document.querySelectorAll('.expense-checkbox');
-        const bulkDeleteBtn = document.getElementById('bulkDeleteBtn');
-        const bulkUpdateDropdown = document.getElementById('bulkUpdateDropdown');
+document.addEventListener('DOMContentLoaded', function () {
+    const selectAll = document.getElementById('selectAll');
+    const checkboxes = document.querySelectorAll('.expense-checkbox');
+    const bulkDeleteBtn = document.getElementById('bulkDeleteBtn');
+    const bulkUpdateDropdown = document.getElementById('bulkUpdateDropdown');
 
-        function updateBulkActionsVisibility() {
-            const checkedCount = document.querySelectorAll('.expense-checkbox:checked').length;
-            bulkDeleteBtn.style.display = checkedCount > 0 ? 'inline-block' : 'none';
-            bulkUpdateDropdown.style.display = checkedCount > 0 ? 'inline-block' : 'none';
-        }
+    function updateBulkActionsVisibility() {
+        const checkedCount = document.querySelectorAll('.expense-checkbox:checked').length;
+        bulkDeleteBtn.style.display = checkedCount > 0 ? 'inline-block' : 'none';
+        bulkUpdateDropdown.style.display = checkedCount > 0 ? 'inline-block' : 'none';
+    }
 
-        if (selectAll) {
-            selectAll.addEventListener('change', function () {
-                checkboxes.forEach(cb => cb.checked = selectAll.checked);
-                updateBulkActionsVisibility();
-            });
-        }
-
-        checkboxes.forEach(cb => {
-            cb.addEventListener('change', updateBulkActionsVisibility);
+    if (selectAll) {
+        selectAll.addEventListener('change', function () {
+            checkboxes.forEach(cb => cb.checked = selectAll.checked);
+            updateBulkActionsVisibility();
         });
+    }
 
-        if (bulkDeleteBtn) {
-            bulkDeleteBtn.addEventListener('click', function () {
-                if (!confirm('Are you sure you want to delete selected expenses?')) return;
-                const ids = Array.from(document.querySelectorAll('.expense-checkbox:checked')).map(cb => cb.value);
-                fetch('/bulk_delete_expenses', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ ids: ids })
-                }).then(res => res.json()).then(data => {
-                    if (data.success) location.reload();
-                    else alert(data.error);
-                });
-            });
-        }
-
-        document.querySelectorAll('.bulk-update-cat').forEach(item => {
-            item.addEventListener('click', function (e) {
-                e.preventDefault();
-                const category = this.dataset.category;
-                const ids = Array.from(document.querySelectorAll('.expense-checkbox:checked')).map(cb => cb.value);
-                fetch('/bulk_update_category', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ ids: ids, category: category })
-                }).then(res => res.json()).then(data => {
-                    if (data.success) location.reload();
-                    else alert(data.error);
-                });
-            });
-        });
-
-        // Initialize tom-select for categories multi-select
-        const categoriesSelect = document.getElementById('categoriesSelect');
-        if (categoriesSelect) {
-            const tomSelect = new TomSelect('#categoriesSelect', {
-                plugins: ['remove_button'],
-                placeholder: 'Select categories...',
-                onChange: function (values) {
-                    // Sync selected values to hidden input for form submission
-                    document.getElementById('categories').value = values.join(',');
-                }
-            });
-        }
-
-        // Collapse indicator rotation
-        const searchHeader = document.querySelector('[data-bs-target="#searchFormCollapse"]');
-        const collapseEl = document.getElementById('searchFormCollapse');
-        if (searchHeader && collapseEl) {
-            collapseEl.addEventListener('show.bs.collapse', function () {
-                searchHeader.querySelector('.collapse-indicator').textContent = '▲';
-            });
-            collapseEl.addEventListener('hide.bs.collapse', function () {
-                searchHeader.querySelector('.collapse-indicator').textContent = '▼';
-            });
-            // Set initial state
-            if (collapseEl.classList.contains('show')) {
-                searchHeader.querySelector('.collapse-indicator').textContent = '▲';
-            }
-        }
+    checkboxes.forEach(cb => {
+        cb.addEventListener('change', updateBulkActionsVisibility);
     });
+
+    if (bulkDeleteBtn) {
+        bulkDeleteBtn.addEventListener('click', function () {
+            if (!confirm('Are you sure you want to delete selected expenses?')) return;
+            const ids = Array.from(document.querySelectorAll('.expense-checkbox:checked')).map(cb => cb.value);
+            fetch('/bulk_delete_expenses', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ ids: ids })
+            }).then(res => res.json()).then(data => {
+                if (data.success) location.reload();
+                else alert(data.error);
+            });
+        });
+    }
+
+    document.querySelectorAll('.bulk-update-cat').forEach(item => {
+        item.addEventListener('click', function (e) {
+            e.preventDefault();
+            const category = this.dataset.category;
+            const ids = Array.from(document.querySelectorAll('.expense-checkbox:checked')).map(cb => cb.value);
+            fetch('/bulk_update_category', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ ids: ids, category: category })
+            }).then(res => res.json()).then(data => {
+                if (data.success) location.reload();
+                else alert(data.error);
+            });
+        });
+    });
+
+    // Initialize tom-select for categories multi-select
+    const categoriesSelect = document.getElementById('categoriesSelect');
+    if (categoriesSelect) {
+        const tomSelect = new TomSelect('#categoriesSelect', {
+            plugins: ['remove_button'],
+            placeholder: 'Select categories...',
+            onChange: function (values) {
+                // Sync selected values to hidden input for form submission
+                document.getElementById('categories').value = values.join(',');
+            }
+        });
+    }
+
+    // Collapse indicator rotation
+    const searchHeader = document.querySelector('[data-bs-target="#searchFormCollapse"]');
+    const collapseEl = document.getElementById('searchFormCollapse');
+    if (searchHeader && collapseEl) {
+        collapseEl.addEventListener('show.bs.collapse', function () {
+            searchHeader.querySelector('.collapse-indicator').textContent = '▲';
+        });
+        collapseEl.addEventListener('hide.bs.collapse', function () {
+            searchHeader.querySelector('.collapse-indicator').textContent = '▼';
+        });
+        // Set initial state
+        if (collapseEl.classList.contains('show')) {
+            searchHeader.querySelector('.collapse-indicator').textContent = '▲';
+        }
+    }
+});
 </script>
 {% endblock %}

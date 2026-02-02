@@ -1,5 +1,3 @@
-/* Expense Tracker - Main Styles */
-
 body {
     background-color: #f8f9fa;
     color: #212529;
@@ -80,92 +78,6 @@ body {
     position: relative;
     height: 320px;
     width: 100%;
-}
-
-/* Search & Filter Form Styles */
-.search-form-container {
-    background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
-    border: 1px solid #dee2e6;
-}
-
-.search-form-container .card-header {
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-    color: white;
-    border-radius: 10px 10px 0 0;
-    font-weight: 500;
-    transition: background 0.3s ease;
-}
-
-.search-form-container .card-header:hover {
-    background: linear-gradient(135deg, #5a67d8 0%, #6b46a3 100%);
-}
-
-.search-form-container .search-icon {
-    font-style: normal;
-    margin-right: 8px;
-}
-
-.search-form-container .collapse-indicator {
-    transition: transform 0.3s ease;
-    font-size: 0.8rem;
-}
-
-.search-form-container .card-body {
-    background-color: #ffffff;
-    border-radius: 0 0 10px 10px;
-}
-
-/* Tom Select Custom Styles */
-.ts-wrapper {
-    width: 100%;
-}
-
-.ts-wrapper .ts-control {
-    border-radius: 6px;
-    padding: 0.4rem 0.75rem;
-    min-height: 38px;
-    border-color: #ced4da;
-}
-
-.ts-wrapper .ts-control:focus,
-.ts-wrapper.focus .ts-control {
-    border-color: #0d6efd;
-    box-shadow: 0 0 0 0.15rem rgba(13, 110, 253, 0.25);
-}
-
-.ts-wrapper .ts-dropdown {
-    border-radius: 6px;
-    border-color: #ced4da;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
-}
-
-.ts-wrapper .ts-dropdown .option {
-    padding: 0.5rem 0.75rem;
-}
-
-.ts-wrapper .ts-dropdown .option.active {
-    background-color: #0d6efd;
-    color: white;
-}
-
-.ts-wrapper .item {
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-    color: white;
-    border: none;
-    border-radius: 4px;
-    padding: 2px 8px;
-}
-
-.ts-wrapper .item .remove {
-    color: white;
-    border-left-color: rgba(255, 255, 255, 0.3);
-}
-
-/* Filter Results Alert */
-.alert-info {
-    background: linear-gradient(135deg, #d1ecf1 0%, #bee5eb 100%);
-    border: 1px solid #bee5eb;
-    color: #0c5460;
 }
 
 @media (max-width: 576px) {
