@@ -19,6 +19,87 @@
     </div>
 </div>
 
+<!-- Search & Filter Form -->
+<div class="card mb-4 search-form-container">
+    <div class="card-header d-flex justify-content-between align-items-center" style="cursor: pointer;" data-bs-toggle="collapse" data-bs-target="#searchFormCollapse">
+        <span><i class="search-icon">🔍</i> Search & Filter Expenses</span>
+        <span class="collapse-indicator">▼</span>
+    </div>
+    <div class="collapse {% if is_filtered %}show{% endif %}" id="searchFormCollapse">
+        <div class="card-body">
+            <form action="{{ url_for('search_expenses') }}" method="GET" id="searchForm">
+                <div class="row g-3">
+                    <!-- Date Range -->
+                    <div class="col-md-3">
+                        <label for="date_from" class="form-label">From Date</label>
+                        <input type="date" class="form-control" id="date_from" name="date_from" value="{{ filters.date_from if filters else '' }}">
+                    </div>
+                    <div class="col-md-3">
+                        <label for="date_to" class="form-label">To Date</label>
+                        <input type="date" class="form-control" id="date_to" name="date_to" value="{{ filters.date_to if filters else '' }}">
+                    </div>
+                    <!-- Categories Multi-select -->
+                    <div class="col-md-6">
+                        <label for="categories" class="form-label">Categories</label>
+                        <select id="categoriesSelect" multiple placeholder="Select categories...">
+                            {% for cat in categories %}
+                            <option value="{{ cat }}" {% if filters and cat in (filters.categories or '' ).split(',') %}selected{% endif %}>{{ cat }}</option>
+                            {% endfor %}
+                        </select>
+                        <input type="hidden" id="categories" name="categories" value="{{ filters.categories if filters else '' }}">
+                    </div>
+                    <!-- Amount Range -->
+                    <div class="col-md-3">
+                        <label for="amount_min" class="form-label">Min Amount</label>
+                        <input type="number" class="form-control" id="amount_min" name="amount_min" step="0.01" min="0" placeholder="0.00" value="{{ filters.amount_min if filters else '' }}">
+                    </div>
+                    <div class="col-md-3">
+                        <label for="amount_max" class="form-label">Max Amount</label>
+                        <input type="number" class="form-control" id="amount_max" name="amount_max" step="0.01" min="0" placeholder="0.00" value="{{ filters.amount_max if filters else '' }}">
+                    </div>
+                    <!-- Keyword Search -->
+                    <div class="col-md-6">
+                        <label for="keyword" class="form-label">Search Description</label>
+                        <input type="text" class="form-control" id="keyword" name="keyword" placeholder="Enter keyword..." value="{{ filters.keyword if filters else '' }}">
+                    </div>
+                    <!-- Sort Options -->
+                    <div class="col-md-3">
+                        <label for="sort_by" class="form-label">Sort By</label>
+                        <select class="form-select" id="sort_by" name="sort_by">
+                            <option value="date" {% if filters and filters.sort_by=='date' %}selected{% endif %}>Date</option>
+                            <option value="amount" {% if filters and filters.sort_by=='amount' %}selected{% endif %}>Amount</option>
+                            <option value="category" {% if filters and filters.sort_by=='category' %}selected{% endif %}>Category</option>
+                        </select>
+                    </div>
+                    <div class="col-md-3">
+                        <label for="sort_order" class="form-label">Order</label>
+                        <select class="form-select" id="sort_order" name="sort_order">
+                            <option value="desc" {% if filters and filters.sort_order=='desc' %}selected{% endif %}>Descending</option>
+                            <option value="asc" {% if filters and filters.sort_order=='asc' %}selected{% endif %}>Ascending</option>
+                        </select>
+                    </div>
+                    <!-- Action Buttons -->
+                    <div class="col-md-6 d-flex align-items-end gap-2">
+                        <button type="submit" class="btn btn-primary">
+                            <span>🔍</span> Search
+                        </button>
+                        <a href="{{ url_for('expenses') }}" class="btn btn-outline-secondary">
+                            Clear Filters
+                        </a>
+                    </div>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+{% if is_filtered %}
+<div class="alert alert-info d-flex justify-content-between align-items-center mb-3">
+    <span>Showing {{ expenses|length }} filtered result(s)</span>
+    <a href="{{ url_for('expenses') }}" class="btn btn-sm btn-outline-info">Show All</a>
+</div>
+{% endif %}
+
 <div class="card">
     <div class="card-body">
         {% if expenses %}
@@ -29,7 +110,6 @@
                     Update Category
                 </button>
                 <ul class="dropdown-menu">
-                    {% set categories = ['Food', 'Transport', 'Entertainment', 'Shopping', 'Bills', 'Miscellaneous'] %}
                     {% for cat in categories %}
                     <li><a class="dropdown-item bulk-update-cat" href="#" data-category="{{ cat }}">{{ cat }}</a></li>
                     {% endfor %}
@@ -72,7 +152,7 @@
 </div>
 
 <script>
-document.addEventListener('DOMContentLoaded', function() {
+document.addEventListener('DOMContentLoaded', function () {
     const selectAll = document.getElementById('selectAll');
     const checkboxes = document.querySelectorAll('.expense-checkbox');
     const bulkDeleteBtn = document.getElementById('bulkDeleteBtn');
@@ -85,7 +165,7 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     if (selectAll) {
-        selectAll.addEventListener('change', function() {
+        selectAll.addEventListener('change', function () {
             checkboxes.forEach(cb => cb.checked = selectAll.checked);
             updateBulkActionsVisibility();
         });
@@ -96,7 +176,7 @@ document.addEventListener('DOMContentLoaded', function() {
     });
 
     if (bulkDeleteBtn) {
-        bulkDeleteBtn.addEventListener('click', function() {
+        bulkDeleteBtn.addEventListener('click', function () {
             if (!confirm('Are you sure you want to delete selected expenses?')) return;
             const ids = Array.from(document.querySelectorAll('.expense-checkbox:checked')).map(cb => cb.value);
             fetch('/bulk_delete_expenses', {
@@ -111,7 +191,7 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     document.querySelectorAll('.bulk-update-cat').forEach(item => {
-        item.addEventListener('click', function(e) {
+        item.addEventListener('click', function (e) {
             e.preventDefault();
             const category = this.dataset.category;
             const ids = Array.from(document.querySelectorAll('.expense-checkbox:checked')).map(cb => cb.value);
@@ -125,6 +205,35 @@ document.addEventListener('DOMContentLoaded', function() {
             });
         });
     });
+
+    // Initialize tom-select for categories multi-select
+    const categoriesSelect = document.getElementById('categoriesSelect');
+    if (categoriesSelect) {
+        const tomSelect = new TomSelect('#categoriesSelect', {
+            plugins: ['remove_button'],
+            placeholder: 'Select categories...',
+            onChange: function (values) {
+                // Sync selected values to hidden input for form submission
+                document.getElementById('categories').value = values.join(',');
+            }
+        });
+    }
+
+    // Collapse indicator rotation
+    const searchHeader = document.querySelector('[data-bs-target="#searchFormCollapse"]');
+    const collapseEl = document.getElementById('searchFormCollapse');
+    if (searchHeader && collapseEl) {
+        collapseEl.addEventListener('show.bs.collapse', function () {
+            searchHeader.querySelector('.collapse-indicator').textContent = '▲';
+        });
+        collapseEl.addEventListener('hide.bs.collapse', function () {
+            searchHeader.querySelector('.collapse-indicator').textContent = '▼';
+        });
+        // Set initial state
+        if (collapseEl.classList.contains('show')) {
+            searchHeader.querySelector('.collapse-indicator').textContent = '▲';
+        }
+    }
 });
 </script>
 {% endblock %}

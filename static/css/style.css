@@ -1,28 +1,3 @@
-<<<<<<< HEAD
-body {
-    background-color: #f8f9fa;
-}
-
-.card {
-    box-shadow: 0 0.125rem 0.25rem rgba(0, 0, 0, 0.075);
-    border: 1px solid rgba(0, 0, 0, 0.125);
-}
-
-.navbar-brand {
-    font-weight: bold;
-}
-
-.table th {
-    border-top: none;
-    font-weight: 600;
-}
-
-.chart-container {
-    position: relative;
-    height: 300px;
-    width: 100%;
-}
-=======
 body {
     background-color: #f8f9fa;
     color: #212529;
@@ -114,4 +89,3 @@ body {
         padding: 0.6rem;
     }
 }
->>>>>>> eae67c6cd06c36c9dd29986198a9105c3c897a05

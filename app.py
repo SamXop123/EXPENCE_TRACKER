@@ -285,9 +285,91 @@ def expenses():
     ).fetchall()
     conn.close()
     
-    # Optional: Convert amounts for display if needed inside template
-    # For now, passing raw list (template handles logic or shows stored value)
-    return render_template('expenses.html', expenses=expenses_list)
+    categories = ['Food', 'Transportation', 'Entertainment', 'Shopping', 'Bills', 'Healthcare', 'Other']
+    return render_template('expenses.html', expenses=expenses_list, categories=categories)
+
+@app.route('/search_expenses')
+def search_expenses():
+    if 'user_id' not in session:
+        return redirect(url_for('login'))
+    
+    # Get filter parameters
+    date_from = request.args.get('date_from', '')
+    date_to = request.args.get('date_to', '')
+    categories_param = request.args.get('categories', '')
+    amount_min = request.args.get('amount_min', '')
+    amount_max = request.args.get('amount_max', '')
+    keyword = request.args.get('keyword', '')
+    sort_by = request.args.get('sort_by', 'date')
+    sort_order = request.args.get('sort_order', 'desc')
+    
+    # Build dynamic query
+    query = 'SELECT * FROM expenses WHERE user_id = ?'
+    params = [session['user_id']]
+    
+    # Date range filter
+    if date_from:
+        query += ' AND date >= ?'
+        params.append(date_from)
+    if date_to:
+        query += ' AND date <= ?'
+        params.append(date_to)
+    
+    # Category filter (multiple categories supported)
+    if categories_param:
+        selected_categories = [c.strip() for c in categories_param.split(',') if c.strip()]
+        if selected_categories:
+            placeholders = ','.join(['?' for _ in selected_categories])
+            query += f' AND category IN ({placeholders})'
+            params.extend(selected_categories)
+    
+    # Amount range filter (using amount_usd for consistent comparison)
+    if amount_min:
+        try:
+            min_usd = convert_to_usd(float(amount_min), session.get('currency', 'USD'))
+            query += ' AND amount_usd >= ?'
+            params.append(min_usd)
+        except ValueError:
+            pass
+    if amount_max:
+        try:
+            max_usd = convert_to_usd(float(amount_max), session.get('currency', 'USD'))
+            query += ' AND amount_usd <= ?'
+            params.append(max_usd)
+        except ValueError:
+            pass
+    
+    # Keyword search in description
+    if keyword:
+        query += ' AND description LIKE ?'
+        params.append(f'%{keyword}%')
+    
+    # Sorting (validate sort_by to prevent SQL injection)
+    valid_sort_columns = {'date': 'date', 'amount': 'amount_usd', 'category': 'category'}
+    sort_column = valid_sort_columns.get(sort_by, 'date')
+    sort_direction = 'ASC' if sort_order.lower() == 'asc' else 'DESC'
+    query += f' ORDER BY {sort_column} {sort_direction}'
+    
+    conn = get_db_connection()
+    expenses_list = conn.execute(query, params).fetchall()
+    conn.close()
+    
+    # Categories for the filter dropdown
+    categories = ['Food', 'Transportation', 'Entertainment', 'Shopping', 'Bills', 'Healthcare', 'Other']
+    
+    # Pass filter values back for form persistence
+    filters = {
+        'date_from': date_from,
+        'date_to': date_to,
+        'categories': categories_param,
+        'amount_min': amount_min,
+        'amount_max': amount_max,
+        'keyword': keyword,
+        'sort_by': sort_by,
+        'sort_order': sort_order
+    }
+    
+    return render_template('expenses.html', expenses=expenses_list, categories=categories, filters=filters, is_filtered=True)
 
 @app.route('/add_expense', methods=['GET', 'POST'])
 def add_expense():
