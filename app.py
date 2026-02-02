@@ -1157,10 +1157,10 @@ def settle_up(group_id):
     
     flash('Payment recorded!')
     return redirect(url_for('group_detail', group_id=group_id))
-
 # ================= CHATBOT =================
 
 
+if __name__ == '__main__':
     init_db()
     # Pre-fetch rates
     try:
