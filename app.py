@@ -8,6 +8,7 @@ import time
 import os
 import io
 import pandas as pd
+from xhtml2pdf import pisa
 from reportlab.lib.pagesizes import letter
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph
 from reportlab.lib.styles import getSampleStyleSheet
@@ -904,70 +905,62 @@ def export_data(data_type, format):
     user_id = session['user_id']
     conn = get_db_connection()
     
+    # 1. Fetch Data
     if data_type == 'expenses':
         query = 'SELECT date, category, description, amount, currency, amount_usd FROM expenses WHERE user_id = ? ORDER BY date DESC'
-        filename = f"expenses_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        filename = f"Expenses_Report_{datetime.now().strftime('%Y-%m-%d')}"
     elif data_type == 'budgets':
         query = 'SELECT category, amount, currency, amount_usd, period, start_date FROM budgets WHERE user_id = ? ORDER BY category'
-        filename = f"budgets_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        filename = f"Budgets_Report_{datetime.now().strftime('%Y-%m-%d')}"
     else:
+        conn.close()
         return "Invalid data type", 400
 
     df = pd.read_sql_query(query, conn, params=(user_id,))
     conn.close()
 
+    # 2. Handle CSV/Excel (Existing Logic)
     if format == 'csv':
         output = io.StringIO()
         df.to_csv(output, index=False)
         output.seek(0)
-        return send_file(
-            io.BytesIO(output.getvalue().encode()),
-            mimetype='text/csv',
-            as_attachment=True,
-            download_name=f"{filename}.csv"
-        )
+        return send_file(io.BytesIO(output.getvalue().encode()), mimetype='text/csv', as_attachment=True, download_name=f"{filename}.csv")
     
     elif format == 'xlsx':
         output = io.BytesIO()
         with pd.ExcelWriter(output, engine='openpyxl') as writer:
             df.to_excel(writer, index=False, sheet_name=data_type.capitalize())
         output.seek(0)
-        return send_file(
-            output,
-            mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-            as_attachment=True,
-            download_name=f"{filename}.xlsx"
-        )
+        return send_file(output, mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', as_attachment=True, download_name=f"{filename}.xlsx")
     
+    # 3. Handle Professional PDF (New Logic - Issue #31)
     elif format == 'pdf':
-        output = io.BytesIO()
-        doc = SimpleDocTemplate(output, pagesize=letter)
-        elements = []
-        styles = getSampleStyleSheet()
+        # Prepare data for Jinja template
+        data_list = df.to_dict('records')
+        total_amount = round(df['amount_usd'].sum(), 2) if 'amount_usd' in df else 0
+        currency = session.get('currency', 'USD')
+
+        # Convert amounts to display currency if needed (simplified for report)
+        # Note: Ideally, you'd convert each row, but for now we list raw values or USD
         
-        # Title
-        elements.append(Paragraph(f"{data_type.capitalize()} Report", styles['Title']))
-        elements.append(Paragraph(f"Generated on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", styles['Normal']))
-        elements.append(Paragraph("<br/><br/>", styles['Normal']))
+        html = render_template(
+            'report_pdf.html', 
+            data=data_list, 
+            date=datetime.now().strftime('%Y-%m-%d %H:%M'),
+            total_amount=total_amount,
+            count=len(df),
+            currency="USD" # Defaulting to base currency for consistency in report
+        )
         
-        # Table
-        data = [df.columns.tolist()] + df.values.tolist()
-        t = Table(data)
-        t.setStyle(TableStyle([
-            ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
-            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
-            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-            ('FONTSIZE', (0, 0), (-1, 0), 12),
-            ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
-            ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
-            ('GRID', (0, 0), (-1, -1), 1, colors.black)
-        ]))
-        elements.append(t)
-        doc.build(elements)
-        output.seek(0)
+        pdf_output = io.BytesIO()
+        pisa_status = pisa.CreatePDF(io.StringIO(html), dest=pdf_output)
+        
+        if pisa_status.err:
+            return f"PDF generation error: {pisa_status.err}", 500
+            
+        pdf_output.seek(0)
         return send_file(
-            output,
+            pdf_output,
             mimetype='application/pdf',
             as_attachment=True,
             download_name=f"{filename}.pdf"
