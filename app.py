@@ -105,6 +105,9 @@ def init_db():
     conn.execute('CREATE INDEX IF NOT EXISTS idx_expenses_user_category ON expenses(user_id, category)')
     conn.execute('CREATE INDEX IF NOT EXISTS idx_budgets_user ON budgets(user_id)')
     conn.execute('CREATE INDEX IF NOT EXISTS idx_categories_user ON categories(user_id)')
+    # Analytics-specific indexes
+    conn.execute('CREATE INDEX IF NOT EXISTS idx_expenses_user_date_category ON expenses(user_id, date, category)')
+    conn.execute('CREATE INDEX IF NOT EXISTS idx_expenses_date_amount ON expenses(date, amount_usd)')
     
     # --- NEW SPLITWISE TABLES ---
     conn.execute('''
@@ -269,6 +272,36 @@ def calculate_group_debts(group_id):
     
     conn.close()
     return transactions
+
+# --- CATEGORY HELPERS ---
+def get_user_categories(user_id):
+    """Get all categories for a user, including default categories if none exist"""
+    conn = get_db_connection()
+    custom_categories = conn.execute(
+        'SELECT * FROM categories WHERE user_id = ? ORDER BY name',
+        (user_id,)
+    ).fetchall()
+    conn.close()
+    
+    # Convert to list of dicts
+    categories = [dict(row) for row in custom_categories]
+    
+    # If no custom categories, return default ones
+    if not categories:
+        default_categories = ['Food', 'Transportation', 'Entertainment', 'Shopping', 'Bills', 'Healthcare', 'Other']
+        return [{'name': cat, 'icon': '📁', 'color': '#6c757d'} for cat in default_categories]
+    
+    return categories
+
+def get_category_by_id(category_id, user_id):
+    """Get a specific category by ID for the given user"""
+    conn = get_db_connection()
+    category = conn.execute(
+        'SELECT * FROM categories WHERE id = ? AND user_id = ?',
+        (category_id, user_id)
+    ).fetchone()
+    conn.close()
+    return category
 
 # --- ROUTES ---
 
@@ -750,41 +783,262 @@ def analytics():
 
     conn = get_db_connection()
     display_currency = session.get('currency', 'INR')
-
-    # Daily Spending (Last 7 Days)
+    user_id = session['user_id']
+    
+    # Get time range parameters
+    time_range = request.args.get('range', '7')  # 7, 30, 90, 365, or 'custom'
+    custom_from = request.args.get('from', '')
+    custom_to = request.args.get('to', '')
+    
+    # Calculate date range
     end_date = datetime.now()
-    start_date = end_date - timedelta(days=6)
+    if time_range == 'custom' and custom_from and custom_to:
+        start_date = datetime.strptime(custom_from, '%Y-%m-%d')
+        end_date = datetime.strptime(custom_to, '%Y-%m-%d')
+        days_count = (end_date - start_date).days + 1
+    else:
+        days = int(time_range) if time_range.isdigit() else 7
+        start_date = end_date - timedelta(days=days-1)
+        days_count = days
+    
+    # --- DAILY SPENDING TREND ---
+    daily_labels = []
     daily_data = []
-    labels = []
-
-    for i in range(7):
+    
+    for i in range(days_count):
         current_date = (start_date + timedelta(days=i)).strftime('%Y-%m-%d')
-        labels.append((start_date + timedelta(days=i)).strftime('%b %d'))
+        daily_labels.append((start_date + timedelta(days=i)).strftime('%b %d'))
         
         total_usd = conn.execute(
             'SELECT COALESCE(SUM(amount_usd), 0) FROM expenses WHERE user_id=? AND date=?',
-            (session['user_id'], current_date)
+            (user_id, current_date)
         ).fetchone()[0]
-        daily_data.append(convert_from_usd(total_usd, display_currency))
-
-    # Category Breakdown
+        daily_data.append(round(convert_from_usd(total_usd, display_currency), 2))
+    
+    # --- CATEGORY BREAKDOWN ---
     categories_data = conn.execute(
         '''SELECT category, COALESCE(SUM(amount_usd), 0) as total_usd 
-           FROM expenses WHERE user_id=? GROUP BY category''',
-        (session['user_id'],)
+           FROM expenses WHERE user_id=? AND date BETWEEN ? AND ?
+           GROUP BY category''',
+        (user_id, start_date.strftime('%Y-%m-%d'), end_date.strftime('%Y-%m-%d'))
     ).fetchall()
-
+    
     category_labels = [row['category'] for row in categories_data]
-    category_totals = [convert_from_usd(row['total_usd'], display_currency) for row in categories_data]
-
+    category_totals = [round(convert_from_usd(row['total_usd'], display_currency), 2) for row in categories_data]
+    
+    # --- BUDGET PERFORMANCE ---
+    budgets = conn.execute('SELECT * FROM budgets WHERE user_id = ?', (user_id,)).fetchall()
+    budget_labels = []
+    budget_allocated = []
+    budget_spent = []
+    
+    for budget in budgets:
+        budget_labels.append(budget['category'])
+        budget_allocated.append(round(convert_from_usd(budget['amount_usd'], display_currency), 2))
+        
+        # Calculate period
+        if budget['period'] == 'monthly':
+            period_start = datetime.now().replace(day=1).strftime('%Y-%m-%d')
+        elif budget['period'] == 'weekly':
+            period_start = (datetime.now() - timedelta(days=datetime.now().weekday())).strftime('%Y-%m-%d')
+        else:  # yearly
+            period_start = datetime.now().replace(month=1, day=1).strftime('%Y-%m-%d')
+        
+        actual_usd = conn.execute(
+            '''SELECT COALESCE(SUM(amount_usd), 0) FROM expenses 
+               WHERE user_id = ? AND category = ? AND date >= ?''',
+            (user_id, budget['category'], period_start)
+        ).fetchone()[0]
+        budget_spent.append(round(convert_from_usd(actual_usd, display_currency), 2))
+    
+    # --- COMPARATIVE ANALYTICS (Month-over-Month) ---
+    current_month_start = datetime.now().replace(day=1)
+    current_month_end = datetime.now()
+    last_month_end = current_month_start - timedelta(days=1)
+    last_month_start = last_month_end.replace(day=1)
+    
+    current_month_total_usd = conn.execute(
+        'SELECT COALESCE(SUM(amount_usd), 0) FROM expenses WHERE user_id=? AND date BETWEEN ? AND ?',
+        (user_id, current_month_start.strftime('%Y-%m-%d'), current_month_end.strftime('%Y-%m-%d'))
+    ).fetchone()[0]
+    
+    last_month_total_usd = conn.execute(
+        'SELECT COALESCE(SUM(amount_usd), 0) FROM expenses WHERE user_id=? AND date BETWEEN ? AND ?',
+        (user_id, last_month_start.strftime('%Y-%m-%d'), last_month_end.strftime('%Y-%m-%d'))
+    ).fetchone()[0]
+    
+    mom_current = round(convert_from_usd(current_month_total_usd, display_currency), 2)
+    mom_last = round(convert_from_usd(last_month_total_usd, display_currency), 2)
+    mom_change = round(((current_month_total_usd - last_month_total_usd) / last_month_total_usd * 100) if last_month_total_usd > 0 else 0, 1)
+    
+    # --- YEAR-OVER-YEAR COMPARISON ---
+    current_year = datetime.now().year
+    last_year = current_year - 1
+    
+    current_year_total_usd = conn.execute(
+        'SELECT COALESCE(SUM(amount_usd), 0) FROM expenses WHERE user_id=? AND strftime("%Y", date) = ?',
+        (user_id, str(current_year))
+    ).fetchone()[0]
+    
+    last_year_total_usd = conn.execute(
+        'SELECT COALESCE(SUM(amount_usd), 0) FROM expenses WHERE user_id=? AND strftime("%Y", date) = ?',
+        (user_id, str(last_year))
+    ).fetchone()[0]
+    
+    yoy_current = round(convert_from_usd(current_year_total_usd, display_currency), 2)
+    yoy_last = round(convert_from_usd(last_year_total_usd, display_currency), 2)
+    yoy_change = round(((current_year_total_usd - last_year_total_usd) / last_year_total_usd * 100) if last_year_total_usd > 0 else 0, 1)
+    
+    # --- SPENDING FORECAST (Next 30 Days) ---
+    last_30_days = end_date - timedelta(days=29)
+    recent_expenses = conn.execute(
+        'SELECT date, COALESCE(SUM(amount_usd), 0) as daily_total FROM expenses WHERE user_id=? AND date BETWEEN ? AND ? GROUP BY date',
+        (user_id, last_30_days.strftime('%Y-%m-%d'), end_date.strftime('%Y-%m-%d'))
+    ).fetchall()
+    
+    if len(recent_expenses) >= 7:
+        # Simple moving average forecast
+        recent_totals = [row['daily_total'] for row in recent_expenses]
+        avg_daily_spend = sum(recent_totals) / len(recent_totals)
+        forecast_next_month = round(convert_from_usd(avg_daily_spend * 30, display_currency), 2)
+    else:
+        forecast_next_month = 0
+    
+    # --- TRANSACTION ANALYTICS ---
+    total_transactions = conn.execute(
+        'SELECT COUNT(*) FROM expenses WHERE user_id=? AND date BETWEEN ? AND ?',
+        (user_id, start_date.strftime('%Y-%m-%d'), end_date.strftime('%Y-%m-%d'))
+    ).fetchone()[0]
+    
+    avg_expense_usd = conn.execute(
+        'SELECT AVG(amount_usd) FROM expenses WHERE user_id=? AND date BETWEEN ? AND ?',
+        (user_id, start_date.strftime('%Y-%m-%d'), end_date.strftime('%Y-%m-%d'))
+    ).fetchone()[0] or 0
+    
+    avg_expense = round(convert_from_usd(avg_expense_usd, display_currency), 2)
+    
+    # --- SPENDING PATTERNS (Weekend vs Weekday) ---
+    weekend_usd = conn.execute(
+        '''SELECT COALESCE(SUM(amount_usd), 0) FROM expenses 
+           WHERE user_id=? AND date BETWEEN ? AND ? 
+           AND CAST(strftime('%w', date) AS INTEGER) IN (0, 6)''',
+        (user_id, start_date.strftime('%Y-%m-%d'), end_date.strftime('%Y-%m-%d'))
+    ).fetchone()[0]
+    
+    weekday_usd = conn.execute(
+        '''SELECT COALESCE(SUM(amount_usd), 0) FROM expenses 
+           WHERE user_id=? AND date BETWEEN ? AND ? 
+           AND CAST(strftime('%w', date) AS INTEGER) NOT IN (0, 6)''',
+        (user_id, start_date.strftime('%Y-%m-%d'), end_date.strftime('%Y-%m-%d'))
+    ).fetchone()[0]
+    
+    weekend_spending = round(convert_from_usd(weekend_usd, display_currency), 2)
+    weekday_spending = round(convert_from_usd(weekday_usd, display_currency), 2)
+    
+    # --- HEAT MAP DATA (Day of Week) ---
+    heatmap_data = [0] * 7  # Sun-Sat
+    for day in range(7):
+        day_total_usd = conn.execute(
+            '''SELECT COALESCE(SUM(amount_usd), 0) FROM expenses 
+               WHERE user_id=? AND date BETWEEN ? AND ? 
+               AND CAST(strftime('%w', date) AS INTEGER) = ?''',
+            (user_id, start_date.strftime('%Y-%m-%d'), end_date.strftime('%Y-%m-%d'), day)
+        ).fetchone()[0]
+        heatmap_data[day] = round(convert_from_usd(day_total_usd, display_currency), 2)
+    
+    # --- CATEGORY TRENDS (Growth/Decline) ---
+    category_trends = []
+    for cat_row in categories_data:
+        cat = cat_row['category']
+        # Compare current period to previous period
+        prev_start = start_date - timedelta(days=days_count)
+        prev_end = start_date - timedelta(days=1)
+        
+        prev_total_usd = conn.execute(
+            'SELECT COALESCE(SUM(amount_usd), 0) FROM expenses WHERE user_id=? AND category=? AND date BETWEEN ? AND ?',
+            (user_id, cat, prev_start.strftime('%Y-%m-%d'), prev_end.strftime('%Y-%m-%d'))
+        ).fetchone()[0]
+        
+        current_total_usd = cat_row['total_usd']
+        change_pct = round(((current_total_usd - prev_total_usd) / prev_total_usd * 100) if prev_total_usd > 0 else 0, 1)
+        
+        category_trends.append({
+            'category': cat,
+            'change': change_pct,
+            'direction': 'up' if change_pct > 0 else 'down' if change_pct < 0 else 'stable'
+        })
+    
+    # --- FINANCIAL HEALTH SCORE (0-100) ---
+    # Based on: budget adherence (40%), spending trend (30%), transaction frequency (30%)
+    health_score = 100
+    
+    # Budget adherence
+    if budgets:
+        over_budget_count = sum(1 for i, b in enumerate(budgets) if i < len(budget_spent) and budget_spent[i] > budget_allocated[i])
+        budget_score = max(0, 100 - (over_budget_count / len(budgets) * 100))
+        health_score = budget_score * 0.4
+    else:
+        health_score = 40  # Neutral if no budgets
+    
+    # Spending trend (lower is better)
+    if mom_change < -10:
+        health_score += 30  # Decreasing spending
+    elif mom_change > 10:
+        health_score += 10  # Increasing spending
+    else:
+        health_score += 20  # Stable
+    
+    # Transaction discipline (consistent spending)
+    if total_transactions > 0:
+        avg_daily_transactions = total_transactions / days_count
+        if 0.5 <= avg_daily_transactions <= 3:
+            health_score += 30  # Good discipline
+        else:
+            health_score += 15  # Too many or too few
+    else:
+        health_score += 15
+    
+    health_score = min(100, max(0, round(health_score)))
+    
     conn.close()
 
     return render_template(
         'analytics.html',
-        labels=json.dumps(labels),
+        # Time range
+        time_range=time_range,
+        custom_from=custom_from,
+        custom_to=custom_to,
+        # Daily trend
+        labels=json.dumps(daily_labels),
         daily_data=json.dumps(daily_data),
+        # Category breakdown
         category_labels=json.dumps(category_labels),
         category_totals=json.dumps(category_totals),
+        # Budget performance
+        budget_labels=json.dumps(budget_labels),
+        budget_allocated=json.dumps(budget_allocated),
+        budget_spent=json.dumps(budget_spent),
+        # Comparative analytics
+        mom_current=mom_current,
+        mom_last=mom_last,
+        mom_change=mom_change,
+        yoy_current=yoy_current,
+        yoy_last=yoy_last,
+        yoy_change=yoy_change,
+        # Predictions
+        forecast_next_month=forecast_next_month,
+        # Statistics
+        total_transactions=total_transactions,
+        avg_expense=avg_expense,
+        weekend_spending=weekend_spending,
+        weekday_spending=weekday_spending,
+        # Heat map
+        heatmap_data=json.dumps(heatmap_data),
+        # Category trends
+        category_trends=category_trends,
+        # Health score
+        health_score=health_score,
+        # Currency
         currency=display_currency
     )
 

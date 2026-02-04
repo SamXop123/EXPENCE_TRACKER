@@ -1,113 +1,486 @@
 {% extends "base.html" %}
 
-{% block title %}Analytics - Expense Tracker{% endblock %}
+{% block title %}Advanced Analytics - Expense Tracker{% endblock %}
 
 {% block content %}
-<div class="row">
+<div class="row mb-4">
     <div class="col-12">
-        <h2>Spending Analytics</h2>
+        <h2>📊 Advanced Analytics Dashboard</h2>
     </div>
 </div>
 
-<div class="row mt-4">
+<!-- Time Range Selector & Health Score -->
+<div class="row mb-4">
     <div class="col-md-8">
         <div class="card">
-            <div class="card-header">
-                <h5 class="mb-0">Daily Spending (Last 7 Days)</h5>
-            </div>
             <div class="card-body">
-                <canvas id="dailySpendingChart" height="250"></canvas>
+                <h6 class="mb-3">📅 Time Range Selector</h6>
+                <form action="{{ url_for('analytics') }}" method="get" id="timeRangeForm">
+                    <div class="row g-2">
+                        <div class="col-md-6">
+                            <select name="range" id="rangeSelect" class="form-select" onchange="toggleCustomDates()">
+                                <option value="7" {% if time_range=='7' %}selected{% endif %}>Last 7 Days</option>
+                                <option value="30" {% if time_range=='30' %}selected{% endif %}>Last 30 Days</option>
+                                <option value="90" {% if time_range=='90' %}selected{% endif %}>Last 90 Days</option>
+                                <option value="365" {% if time_range=='365' %}selected{% endif %}>Last 365 Days</option>
+                                <option value="custom" {% if time_range=='custom' %}selected{% endif %}>Custom Range
+                                </option>
+                            </select>
+                        </div>
+                        <div class="col-md-3" id="customFromDiv"
+                            style="display: {% if time_range == 'custom' %}block{% else %}none{% endif %};">
+                            <input type="date" name="from" class="form-control" value="{{ custom_from }}"
+                                placeholder="From">
+                        </div>
+                        <div class="col-md-3" id="customToDiv"
+                            style="display: {% if time_range == 'custom' %}block{% else %}none{% endif %};">
+                            <input type="date" name="to" class="form-control" value="{{ custom_to }}" placeholder="To">
+                        </div>
+                    </div>
+                    <button type="submit" class="btn btn-primary btn-sm mt-2">Apply</button>
+                </form>
             </div>
         </div>
     </div>
     <div class="col-md-4">
+        <div class="card health-score-card">
+            <div class="card-body text-center">
+                <h6 class="mb-2">💯 Financial Health Score</h6>
+                <div
+                    class="health-score-circle {% if health_score >= 70 %}health-good{% elif health_score >= 50 %}health-warning{% else %}health-danger{% endif %}">
+                    <span class="health-score-value">{{ health_score }}</span>
+                </div>
+                <small class="text-muted d-block mt-2">
+                    {% if health_score >= 70 %}Excellent! Keep it up.{% elif health_score >= 50 %}Good. Room for
+                    improvement.{% else %}Needs attention.{% endif %}
+                </small>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Daily Spending Trend -->
+<div class="row mb-4">
+    <div class="col-12">
         <div class="card">
             <div class="card-header">
-                <h5 class="mb-0">Spending by Category ({{ currency }})</h5>
+                <h5 class="mb-0">📈 Daily Spending Trend ({{ currency }})</h5>
+            </div>
+            <div class="card-body">
+                <canvas id="dailyTrendChart" height="80"></canvas>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Category Breakdown & Budget Performance -->
+<div class="row mb-4">
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0">🎯 Category Breakdown</h5>
             </div>
             <div class="card-body">
                 <canvas id="categoryChart" height="250"></canvas>
             </div>
         </div>
     </div>
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0">💰 Budget Performance</h5>
+            </div>
+            <div class="card-body">
+                {% if budget_labels|length > 0 %}
+                <canvas id="budgetChart" height="250"></canvas>
+                {% else %}
+                <p class="text-muted text-center py-5">No budgets set. <a href="{{ url_for('add_budget') }}">Add a
+                        budget</a> to track performance.</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
 </div>
+
+<!-- Comparative Analytics -->
+<div class="row mb-4">
+    <div class="col-md-6 offset-md-3">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0">📊 Month-over-Month Comparison</h5>
+            </div>
+            <div class="card-body">
+                <div style="position: relative; height: 250px;">
+                    <canvas id="momChart"></canvas>
+                </div>
+                <div class="text-center mt-3">
+                    <span class="badge {% if mom_change < 0 %}bg-success{% else %}bg-danger{% endif %}">
+                        {% if mom_change < 0 %}↓{% else %}↑{% endif %} {{ mom_change|abs }}% {% if mom_change < 0
+                            %}decrease{% else %}increase{% endif %} </span>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Heat Map -->
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0">🔥 Spending Heat Map (By Day of Week)</h5>
+            </div>
+            <div class="card-body">
+                <canvas id="heatmapChart" height="100"></canvas>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Predictions & Statistics -->
+<div class="row mb-4">
+    <div class="col-md-4">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0">🔮 Predictions</h5>
+            </div>
+            <div class="card-body">
+                <div class="stat-item">
+                    <span class="stat-label">Next Month Forecast:</span>
+                    <span class="stat-value">{{ currency }} {{ forecast_next_month }}</span>
+                </div>
+                <small class="text-muted">Based on last 30 days average</small>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0">📉 Transaction Analytics</h5>
+            </div>
+            <div class="card-body">
+                <div class="stat-item">
+                    <span class="stat-label">Total Transactions:</span>
+                    <span class="stat-value">{{ total_transactions }}</span>
+                </div>
+                <div class="stat-item mt-2">
+                    <span class="stat-label">Average Expense:</span>
+                    <span class="stat-value">{{ currency }} {{ avg_expense }}</span>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0">📆 Spending Patterns</h5>
+            </div>
+            <div class="card-body">
+                <div class="stat-item">
+                    <span class="stat-label">Weekend Spending:</span>
+                    <span class="stat-value">{{ currency }} {{ weekend_spending }}</span>
+                </div>
+                <div class="stat-item mt-2">
+                    <span class="stat-label">Weekday Spending:</span>
+                    <span class="stat-value">{{ currency }} {{ weekday_spending }}</span>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Category Trends -->
+{% if category_trends|length > 0 %}
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0">📊 Category Trends</h5>
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    {% for trend in category_trends %}
+                    <div class="col-md-4 mb-3">
+                        <div class="trend-item">
+                            <strong>{{ trend.category }}</strong>
+                            <span
+                                class="trend-badge badge {% if trend.direction == 'up' %}bg-danger{% elif trend.direction == 'down' %}bg-success{% else %}bg-secondary{% endif %}">
+                                {% if trend.direction == 'up' %}↑{% elif trend.direction == 'down' %}↓{% else %}→{%
+                                endif %}
+                                {{ trend.change|abs }}%
+                            </span>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endif %}
+
 {% endblock %}
 
 {% block scripts %}
+<!-- Data Injection Block - Isolates data from logic to prevent IDE lint errors -->
+<script id="data-labels" type="application/json">{{ labels | safe }}</script>
+<script id="data-daily" type="application/json">{{ daily_data | safe }}</script>
+<script id="data-cat-labels" type="application/json">{{ category_labels | safe }}</script>
+<script id="data-cat-totals" type="application/json">{{ category_totals | safe }}</script>
+<script id="data-budget-labels" type="application/json">{{ budget_labels | safe }}</script>
+<script id="data-budget-allocated" type="application/json">{{ budget_allocated | safe }}</script>
+<script id="data-budget-spent" type="application/json">{{ budget_spent | safe }}</script>
+<script id="data-heatmap" type="application/json">{{ heatmap_data | safe }}</script>
+
+<!-- Configuration Data -->
+<div id="analytics-config" data-currency="{{ currency }}" data-mom-last="{{ mom_last }}"
+    data-mom-current="{{ mom_current }}" data-yoy-last="{{ yoy_last }}" data-yoy-current="{{ yoy_current }}"
+    style="display: none;"></div>
+
 <script>
-document.addEventListener('DOMContentLoaded', function() {
-    
-    const dailyCtx = document.getElementById('dailySpendingChart');
-    if (dailyCtx) {
-        const dailyChart = new Chart(dailyCtx, {
-            type: 'line',
-            data: {
-                labels: JSON.parse('{{ labels | safe }}'),
-                datasets: [{
-                    label: 'Daily Spending ({{ currency }})',
-                    data: JSON.parse('{{ daily_data | safe }}'),
-                    borderColor: 'rgb(75, 192, 192)',
-                    backgroundColor: 'rgba(75, 192, 192, 0.1)',
-                    tension: 0.1,
-                    fill: true
-                }]
-            },
-            options: {
-                responsive: true,
-                plugins: {
-                    legend: {
-                        display: true
-                    }
+    // Toggle custom date inputs
+    function toggleCustomDates() {
+        const rangeSelect = document.getElementById('rangeSelect');
+        const customFromDiv = document.getElementById('customFromDiv');
+        const customToDiv = document.getElementById('customToDiv');
+
+        if (rangeSelect.value === 'custom') {
+            customFromDiv.style.display = 'block';
+            customToDiv.style.display = 'block';
+        } else {
+            customFromDiv.style.display = 'none';
+            customToDiv.style.display = 'none';
+        }
+    }
+
+    document.addEventListener('DOMContentLoaded', function () {
+        // Helper to safely parse JSON from script tags
+        const getJsonData = (id) => {
+            try {
+                const el = document.getElementById(id);
+                return el ? JSON.parse(el.textContent) : [];
+            } catch (e) {
+                console.error('Error parsing data for ' + id, e);
+                return [];
+            }
+        };
+
+        // Helper to get scalar config
+        const configDiv = document.getElementById('analytics-config');
+        const currency = configDiv.dataset.currency || '$';
+
+        const chartData = {
+            dailyLabels: getJsonData('data-labels'),
+            dailyData: getJsonData('data-daily'),
+            catLabels: getJsonData('data-cat-labels'),
+            catTotals: getJsonData('data-cat-totals'),
+            budgetLabels: getJsonData('data-budget-labels'),
+            budgetAllocated: getJsonData('data-budget-allocated'),
+            budgetSpent: getJsonData('data-budget-spent'),
+            heatmapData: getJsonData('data-heatmap'),
+            momLast: parseFloat(configDiv.dataset.momLast || 0),
+            momCurrent: parseFloat(configDiv.dataset.momCurrent || 0),
+            yoyLast: parseFloat(configDiv.dataset.yoyLast || 0),
+            yoyCurrent: parseFloat(configDiv.dataset.yoyCurrent || 0)
+        };
+
+        // Daily Trend Chart (Area Chart)
+        const dailyCtx = document.getElementById('dailyTrendChart');
+        if (dailyCtx) {
+            new Chart(dailyCtx, {
+                type: 'line',
+                data: {
+                    labels: chartData.dailyLabels,
+                    datasets: [{
+                        label: `Daily Spending (${currency})`,
+                        data: chartData.dailyData,
+                        borderColor: 'rgb(75, 192, 192)',
+                        backgroundColor: 'rgba(75, 192, 192, 0.2)',
+                        tension: 0.3,
+                        fill: true,
+                        pointRadius: 4,
+                        pointHoverRadius: 6
+                    }]
                 },
-                scales: {
-                    y: {
-                        beginAtZero: true,
-                        ticks: {
-                            callback: function(value) {
-                                return '{{ currency }} ' + value;
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: true },
+                        tooltip: {
+                            callbacks: {
+                                label: function (context) {
+                                    return currency + ' ' + context.parsed.y.toFixed(2);
+                                }
                             }
                         }
                     },
-                    x: {
-                        ticks: {
-                            maxTicksLimit: 10
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            ticks: {
+                                callback: function (value) {
+                                    return currency + ' ' + value;
+                                }
+                            }
                         }
                     }
                 }
-            }
-        });
-    }
+            });
+        }
 
-    
-    const categoryCtx = document.getElementById('categoryChart');
-    if (categoryCtx) {
-        const categoryChart = new Chart(categoryCtx, {
-            type: 'doughnut',
-            data: {
-                labels: JSON.parse('{{ category_labels | safe }}'),
-                datasets: [{
-                    data: JSON.parse('{{ category_totals | safe }}'),
-                    backgroundColor: [
-                        '#FF6384',
-                        '#36A2EB',
-                        '#FFCE56',
-                        '#4BC0C0',
-                        '#9966FF',
-                        '#FF9F40',
-                        '#FF6384'
-                    ]
-                }]
-            },
-            options: {
-                responsive: true,
-                plugins: {
-                    legend: {
-                        position: 'bottom'
+        // Category Breakdown Chart (Doughnut)
+        const categoryCtx = document.getElementById('categoryChart');
+        if (categoryCtx) {
+            new Chart(categoryCtx, {
+                type: 'doughnut',
+                data: {
+                    labels: chartData.catLabels,
+                    datasets: [{
+                        data: chartData.catTotals,
+                        backgroundColor: [
+                            '#FF6384', '#36A2EB', '#FFCE56', '#4BC0C0', '#9966FF', '#FF9F40',
+                            '#E7E9ED', '#76D7C4', '#F7DC6F', '#C39BD3', '#F1948A', '#85929E'
+                        ],
+                        borderWidth: 1
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { position: 'right' },
+                        tooltip: {
+                            callbacks: {
+                                label: function (context) {
+                                    const label = context.label || '';
+                                    const value = context.parsed;
+                                    const total = context.chart._metasets[context.datasetIndex].total;
+                                    const percentage = ((value / total) * 100).toFixed(1) + '%';
+                                    return label + ': ' + currency + ' ' + value.toFixed(2) + ' (' + percentage + ')';
+                                }
+                            }
+                        }
                     }
                 }
-            }
-        });
-    }
-});
+            });
+        }
+
+        // Budget Performance Chart (Grouped Bar)
+        const budgetCtx = document.getElementById('budgetChart');
+        if (budgetCtx && chartData.budgetLabels.length > 0) {
+            new Chart(budgetCtx, {
+                type: 'bar',
+                data: {
+                    labels: chartData.budgetLabels,
+                    datasets: [{
+                        label: 'Allocated',
+                        data: chartData.budgetAllocated,
+                        backgroundColor: 'rgba(54, 162, 235, 0.7)',
+                        borderColor: 'rgb(54, 162, 235)',
+                        borderWidth: 1
+                    }, {
+                        label: 'Spent',
+                        data: chartData.budgetSpent,
+                        backgroundColor: 'rgba(255, 99, 132, 0.7)',
+                        borderColor: 'rgb(255, 99, 132)',
+                        borderWidth: 1
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            ticks: {
+                                callback: function (value) {
+                                    return currency + ' ' + value;
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        // Month-over-Month Chart
+        const momCtx = document.getElementById('momChart');
+        if (momCtx) {
+            new Chart(momCtx, {
+                type: 'bar',
+                data: {
+                    labels: ['Last Month', 'This Month'],
+                    datasets: [{
+                        label: 'Spending',
+                        data: [chartData.momLast, chartData.momCurrent],
+                        backgroundColor: ['rgba(201, 203, 207, 0.7)', 'rgba(75, 192, 192, 0.7)'],
+                        borderWidth: 1
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: { legend: { display: false } },
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            ticks: {
+                                callback: function (value) {
+                                    return currency + ' ' + value;
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+
+
+        // Heatmap (Bar Chart by Day of Week)
+        const heatmapCtx = document.getElementById('heatmapChart');
+        if (heatmapCtx) {
+            const heatmapData = chartData.heatmapData;
+            const dayLabels = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+
+            // Generate colors specifically for brightness
+            const bgColors = heatmapData.map(val => {
+                const maxVal = Math.max(...heatmapData) || 1;
+                const intensity = 0.2 + (val / maxVal * 0.8);
+                return `rgba(255, 159, 64, ${intensity})`;
+            });
+
+            new Chart(heatmapCtx, {
+                type: 'bar',
+                data: {
+                    labels: dayLabels,
+                    datasets: [{
+                        label: 'Avg Spending',
+                        data: heatmapData,
+                        backgroundColor: bgColors,
+                        borderColor: 'rgb(255, 159, 64)',
+                        borderWidth: 1
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    indexAxis: 'y',
+                    plugins: { legend: { display: false } },
+                    scales: {
+                        x: {
+                            beginAtZero: true,
+                            ticks: {
+                                callback: function (value) {
+                                    return currency + ' ' + value;
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+        }
+    });
 </script>
 {% endblock %}
