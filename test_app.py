@@ -1,66 +1,54 @@
-import requests
-import sys
+import pytest
+import sqlite3
+import os
+from app import app, get_db_connection, init_db
 
-print('=' * 60)
-print('EXPENSE TRACKER APP - COMPREHENSIVE TEST')
-print('=' * 60)
+# --- TEST 1: Check Imports ---
+def test_imports():
+    """Ensures all required modules are installed."""
+    required_imports = [
+        'flask', 'sqlite3', 'werkzeug.security', 'requests', 'groq', 'xhtml2pdf'
+    ]
+    for module in required_imports:
+        try:
+            __import__(module)
+        except ImportError:
+            pytest.fail(f"Missing required module: {module}")
 
-# Test main routes
-routes = {
-    '/': 'Index (Home)',
-    '/login': 'Login Page',
-    '/signup': 'Sign Up Page',
-}
+# --- TEST 2: Check Database Schema ---
+def test_database_schema():
+    """Checks if the database initializes with correct tables."""
+    # Use a temporary file-based DB or memory DB for testing context
+    with app.app_context():
+        # Ensure we can init without crashing
+        try:
+            init_db()
+        except Exception as e:
+            pytest.fail(f"Database initialization failed: {e}")
 
-print('\n✓ Testing Main Routes:')
-for route, desc in routes.items():
-    try:
-        r = requests.get(f'http://localhost:5000{route}', timeout=2)
-        status = '✓' if r.status_code == 200 else '✗'
-        print(f'  {status} {desc} ({route}): {r.status_code}')
-    except Exception as e:
-        print(f'  ✗ {desc} ({route}): {str(e)[:40]}')
+        conn = get_db_connection()
+        
+        # Check tables exist
+        cursor = conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
+        tables = [row[0] for row in cursor.fetchall()]
+        expected_tables = ['users', 'expenses', 'budgets', 'categories', 'groups']
+        
+        for table in expected_tables:
+            assert table in tables, f"Database missing table: {table}"
+            
+        conn.close()
 
-# Test database
-print('\n✓ Testing Database:')
-try:
-    from app import get_db_connection
-    conn = get_db_connection()
-    
-    # Check tables
-    cursor = conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
-    tables = [row[0] for row in cursor.fetchall()]
-    print(f'  ✓ Tables found: {", ".join(tables)}')
-    
-    # Check users table schema
-    cursor = conn.execute('PRAGMA table_info(users)')
-    columns = [row[1] for row in cursor.fetchall()]
-    print(f'  ✓ Users table columns: {", ".join(columns)}')
-    
-    conn.close()
-except Exception as e:
-    print(f'  ✗ Database error: {e}')
+# --- TEST 3: Check Routes ---
+def test_routes():
+    """Checks if critical pages load (200 OK or 302 Redirect)."""
+    with app.test_client() as client:
+        routes = {
+            '/': [200, 302],
+            '/login': [200],
+            '/signup': [200],
+        }
 
-# Test imports
-print('\n✓ Testing Imports:')
-required_imports = [
-    ('flask', 'Flask'),
-    ('sqlite3', 'SQLite3'),
-    ('werkzeug.security', 'Werkzeug Security'),
-    ('requests', 'Requests'),
-    ('groq', 'Groq'),
-]
-
-for module, name in required_imports:
-    try:
-        __import__(module)
-        print(f'  ✓ {name}: OK')
-    except ImportError:
-        print(f'  ✗ {name}: MISSING')
-
-print('\n' + '=' * 60)
-print('✓ APP IS READY TO RUN!')
-print('=' * 60)
-print('\nAccess the app at: http://localhost:5000')
-print('\nTo start the app, run:')
-print('  python app.py')
+        for route, valid_codes in routes.items():
+            response = client.get(route)
+            assert response.status_code in valid_codes, \
+                f"Route {route} failed. Got {response.status_code}"

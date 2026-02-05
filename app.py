@@ -15,6 +15,7 @@ from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph
 from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.lib import colors
 from groq import Groq
+from xhtml2pdf import pisa
 
 # --- CONFIGURATION ---
 app = Flask(__name__)
@@ -93,7 +94,7 @@ def init_db():
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id INTEGER NOT NULL,
             name TEXT NOT NULL,
-            icon TEXT DEFAULT '📁',
+            icon TEXT DEFAULT '💰',
             color TEXT DEFAULT '#6c757d',
             FOREIGN KEY (user_id) REFERENCES users (id),
             UNIQUE(user_id, name)
@@ -289,7 +290,7 @@ def get_user_categories(user_id):
     # If no custom categories, return default ones
     if not categories:
         default_categories = ['Food', 'Transportation', 'Entertainment', 'Shopping', 'Bills', 'Healthcare', 'Other']
-        return [{'name': cat, 'icon': '📁', 'color': '#6c757d'} for cat in default_categories]
+        return [{'name': cat, 'icon': '💰', 'color': '#6c757d'} for cat in default_categories]
     
     return categories
 
@@ -407,7 +408,7 @@ def add_category():
     
     if request.method == 'POST':
         name = request.form['name'].strip()
-        icon = request.form.get('icon', '📁')
+        icon = request.form.get('icon', '💰')
         color = request.form.get('color', '#6c757d')
         
         if not name:
@@ -607,13 +608,16 @@ def expenses():
     ).fetchall()
     conn.close()
     
-    categories = ['Food', 'Transportation', 'Entertainment', 'Shopping', 'Bills', 'Healthcare', 'Other']
-    return render_template('expenses.html', expenses=expenses_list, categories=categories)
+    user_categories = get_user_categories(session['user_id'])
+    return render_template('expenses.html', expenses=expenses_list, categories=user_categories)
 
 @app.route('/search_expenses')
 def search_expenses():
     if 'user_id' not in session:
         return redirect(url_for('login'))
+    
+    # Get user categories (FIXED: Defined before use)
+    user_categories = get_user_categories(session['user_id'])
     
     # Get filter parameters
     date_from = request.args.get('date_from', '')
@@ -663,6 +667,9 @@ def search_expenses():
     
     # Keyword search in description
     if keyword:
+        # [FIX] Ensure keyword is a string
+        if not isinstance(keyword, str):
+            keyword = str(keyword)
         query += ' AND description LIKE ?'
         params.append(f'%{keyword}%')
     
@@ -675,9 +682,6 @@ def search_expenses():
     conn = get_db_connection()
     expenses_list = conn.execute(query, params).fetchall()
     conn.close()
-    
-    # Categories for the filter dropdown
-    categories = ['Food', 'Transportation', 'Entertainment', 'Shopping', 'Bills', 'Healthcare', 'Other']
     
     # Pass filter values back for form persistence
     filters = {
@@ -759,7 +763,6 @@ def edit_expense(expense_id):
     user_categories = get_user_categories(session['user_id'])
     return render_template('edit_expense.html', expense=expense, categories=user_categories, selected_currency=expense['currency'])
 
-# ✅ BUG FIXED HERE: delete_expense (Unreachable code issue resolved)
 @app.route('/delete_expense/<int:expense_id>')
 def delete_expense(expense_id):
     if 'user_id' not in session:
@@ -1204,31 +1207,46 @@ def export_data(data_type, format):
         )
     
     elif format == 'pdf':
+        # xhtml2pdf implementation
         output = io.BytesIO()
-        doc = SimpleDocTemplate(output, pagesize=letter)
-        elements = []
-        styles = getSampleStyleSheet()
         
-        # Title
-        elements.append(Paragraph(f"{data_type.capitalize()} Report", styles['Title']))
-        elements.append(Paragraph(f"Generated on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", styles['Normal']))
-        elements.append(Paragraph("<br/><br/>", styles['Normal']))
+        # Simple HTML Template for PDF
+        html_content = f"""
+        <html>
+        <head>
+            <style>
+                body {{ font-family: Helvetica, sans-serif; }}
+                table {{ width: 100%; border-collapse: collapse; }}
+                th, td {{ padding: 8px; text-align: left; border-bottom: 1px solid #ddd; }}
+                th {{ background-color: #f2f2f2; }}
+                h2 {{ color: #333; }}
+            </style>
+        </head>
+        <body>
+            <h2>{data_type.capitalize()} Report</h2>
+            <p>Generated on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</p>
+            <table>
+                <thead>
+                    <tr>
+                        {''.join([f'<th>{col}</th>' for col in df.columns])}
+                    </tr>
+                </thead>
+                <tbody>
+                    {''.join(['<tr>' + ''.join([f'<td>{val}</td>' for val in row]) + '</tr>' for row in df.values])}
+                </tbody>
+            </table>
+        </body>
+        </html>
+        """
         
-        # Table
-        data = [df.columns.tolist()] + df.values.tolist()
-        t = Table(data)
-        t.setStyle(TableStyle([
-            ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
-            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
-            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-            ('FONTSIZE', (0, 0), (-1, 0), 12),
-            ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
-            ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
-            ('GRID', (0, 0), (-1, -1), 1, colors.black)
-        ]))
-        elements.append(t)
-        doc.build(elements)
+        pisa_status = pisa.CreatePDF(
+            src=html_content,
+            dest=output
+        )
+        
+        if pisa_status.err:
+            return f"PDF generation error: {pisa_status.err}", 500
+            
         output.seek(0)
         return send_file(
             output,
@@ -1637,8 +1655,6 @@ def delete_group_expense(group_id, expense_id):
     
     flash('Expense deleted successfully!')
     return redirect(url_for('group_detail', group_id=group_id))
-# ================= CHATBOT =================
-
 
 if __name__ == '__main__':
     init_db()

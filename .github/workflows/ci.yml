@@ -23,7 +23,11 @@ jobs:
         python-version: "3.9"
 
     # 3. Install Dependencies
-    # Note: We explicitly install pytest and flake8 because they are missing from requirements.txt
+    - name: Install System Dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y libcairo2-dev pkg-config python3-dev
+
     - name: Install Dependencies
       run: |
         python -m pip install --upgrade pip
