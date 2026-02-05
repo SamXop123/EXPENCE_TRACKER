@@ -93,7 +93,7 @@ def init_db():
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id INTEGER NOT NULL,
             name TEXT NOT NULL,
-            icon TEXT DEFAULT '📁',
+            icon TEXT DEFAULT '💰',
             color TEXT DEFAULT '#6c757d',
             FOREIGN KEY (user_id) REFERENCES users (id),
             UNIQUE(user_id, name)
@@ -289,7 +289,7 @@ def get_user_categories(user_id):
     # If no custom categories, return default ones
     if not categories:
         default_categories = ['Food', 'Transportation', 'Entertainment', 'Shopping', 'Bills', 'Healthcare', 'Other']
-        return [{'name': cat, 'icon': '📁', 'color': '#6c757d'} for cat in default_categories]
+        return [{'name': cat, 'icon': '💰', 'color': '#6c757d'} for cat in default_categories]
     
     return categories
 
@@ -407,7 +407,7 @@ def add_category():
     
     if request.method == 'POST':
         name = request.form['name'].strip()
-        icon = request.form.get('icon', '📁')
+        icon = request.form.get('icon', '💰')
         color = request.form.get('color', '#6c757d')
         
         if not name:
