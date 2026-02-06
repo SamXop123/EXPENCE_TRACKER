@@ -8,6 +8,9 @@ import time
 import os
 import io
 import pandas as pd
+import jwt
+from functools import wraps
+from flasgger import Swagger, swag_from
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 from reportlab.lib.pagesizes import letter
@@ -15,15 +18,37 @@ from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph
 from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.lib import colors
 from groq import Groq
-try:
-    from xhtml2pdf import pisa
-except ImportError:
-    pisa = None  # PDF export will be unavailable
-
+from xhtml2pdf import pisa
 
 # --- CONFIGURATION ---
 app = Flask(__name__)
 app.secret_key = 'your-secret-key-here'  # Change to random key
+
+# Swagger Configuration
+app.config['SWAGGER'] = {
+    'title': 'Expense Tracker API',
+    'uiversion': 3,
+    'specs_route': '/api/docs/',
+    'securityDefinitions': {
+        'Bearer': {
+            'type': 'apiKey',
+            'name': 'Authorization',
+            'in': 'header',
+            'description': 'JWT Authorization header using the Bearer scheme. Example: \"Authorization: Bearer {token}\"'
+        }
+    },
+    'security': [
+        {
+            'Bearer': []
+        }
+    ]
+}
+swagger = Swagger(app)
+
+# JWT Configuration
+app.config['JWT_SECRET'] = 'your-jwt-secret-key' # In production, use environment variable
+app.config['JWT_ALGORITHM'] = 'HS256'
+
 limiter = Limiter(
     get_remote_address,
     app=app,
@@ -48,6 +73,37 @@ def get_db_connection():
     conn = sqlite3.connect('expenses.db')
     conn.row_factory = sqlite3.Row
     return conn
+
+# --- API HELPERS & DECORATORS ---
+def token_required(f):
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        token = None
+        if 'Authorization' in request.headers:
+            auth_header = request.headers['Authorization']
+            if auth_header.startswith('Bearer '):
+                token = auth_header.split(" ")[1]
+        
+        if not token:
+            return jsonify({'message': 'Token is missing!'}), 401
+        
+        try:
+            data = jwt.decode(token, app.config['JWT_SECRET'], algorithms=[app.config['JWT_ALGORITHM']])
+            current_user_id = data['user_id']
+        except Exception as e:
+            return jsonify({'message': 'Token is invalid!', 'error': str(e)}), 401
+            
+        return f(current_user_id, *args, **kwargs)
+    
+    return decorated
+
+def api_response(success=True, data=None, message=None, code=200):
+    response = {'success': success}
+    if data is not None:
+        response['data'] = data
+    if message is not None:
+        response['message'] = message
+    return jsonify(response), code
 
 def init_db():
     conn = get_db_connection()
@@ -158,25 +214,6 @@ def init_db():
             FOREIGN KEY (user_id) REFERENCES users (id)
         )
     ''')
-    
-    # --- AUDIT LOGS TABLE ---
-    conn.execute('''
-        CREATE TABLE IF NOT EXISTS audit_logs (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER NOT NULL,
-            entity_type TEXT NOT NULL,
-            entity_id INTEGER NOT NULL,
-            action TEXT NOT NULL,
-            old_values TEXT,
-            new_values TEXT,
-            timestamp TEXT NOT NULL,
-            FOREIGN KEY (user_id) REFERENCES users (id)
-        )
-    ''')
-    
-    # Audit logs indexes for performance
-    conn.execute('CREATE INDEX IF NOT EXISTS idx_audit_user_timestamp ON audit_logs(user_id, timestamp)')
-    conn.execute('CREATE INDEX IF NOT EXISTS idx_audit_entity ON audit_logs(entity_type, entity_id)')
     
     conn.commit()
     conn.close()
@@ -327,60 +364,436 @@ def get_category_by_id(category_id, user_id):
     conn.close()
     return category
 
-# --- AUDIT LOGGING HELPERS ---
-def dict_from_row(row):
-    """Convert sqlite3.Row to regular dictionary"""
-    if row is None:
-        return None
-    return {key: row[key] for key in row.keys()}
+# --- API ROUTES ---
 
-def get_current_state(conn, entity_type, entity_id, user_id):
-    """Fetch current state of an entity before modification"""
-    table_map = {
-        'expense': 'expenses',
-        'budget': 'budgets',
-        'category': 'categories'
-    }
-    
-    table = table_map.get(entity_type)
-    if not table:
-        return None
-    
-    row = conn.execute(
-        f'SELECT * FROM {table} WHERE id = ? AND user_id = ?',
-        (entity_id, user_id)
-    ).fetchone()
-    
-    return dict_from_row(row)
+@app.route('/api/auth/signup', methods=['POST'])
+def api_signup():
+    """
+    User Registration
+    ---
+    parameters:
+      - name: body
+        in: body
+        required: true
+        schema:
+          type: object
+          properties:
+            username:
+              type: string
+            email:
+              type: string
+            password:
+              type: string
+    responses:
+      201:
+        description: User created successfully
+      400:
+        description: Invalid input or user already exists
+    """
+    data = request.get_json()
+    username = data.get('username', '').strip()
+    email = data.get('email', '').strip()
+    password = data.get('password', '')
 
-def log_audit_entry(conn, user_id, entity_type, entity_id, action, old_values=None, new_values=None):
-    """
-    Log an audit entry for database mutations.
-    
-    Args:
-        conn: Database connection
-        user_id: ID of the user performing the action
-        entity_type: Type of entity ('expense', 'budget', 'category')
-        entity_id: ID of the entity being modified
-        action: Type of action ('INSERT', 'UPDATE', 'DELETE')
-        old_values: Dict of values before change (for UPDATE/DELETE)
-        new_values: Dict of values after change (for INSERT/UPDATE)
-    """
+    if not username or not email or not password:
+        return api_response(success=False, message='Missing fields', code=400)
+
+    conn = get_db_connection()
     try:
-        timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        
-        # Serialize to JSON
-        old_json = json.dumps(old_values) if old_values else None
-        new_json = json.dumps(new_values) if new_values else None
-        
+        hashed_password = generate_password_hash(password)
         conn.execute(
-            '''INSERT INTO audit_logs (user_id, entity_type, entity_id, action, old_values, new_values, timestamp)
-               VALUES (?, ?, ?, ?, ?, ?, ?)''',
-            (user_id, entity_type, entity_id, action, old_json, new_json, timestamp)
+            'INSERT INTO users (username, email, password) VALUES (?, ?, ?)',
+            (username, email, hashed_password)
         )
-    except Exception as e:
-        # Log error but don't fail the main operation
-        print(f"Audit logging error: {e}")
+        conn.commit()
+        return api_response(message='User created successfully', code=201)
+    except sqlite3.IntegrityError:
+        return api_response(success=False, message='Username or email already exists', code=400)
+    finally:
+        conn.close()
+
+@app.route('/api/auth/login', methods=['POST'])
+def api_login():
+    """
+    User Login
+    ---
+    parameters:
+      - name: body
+        in: body
+        required: true
+        schema:
+          type: object
+          properties:
+            username:
+              type: string
+            password:
+              type: string
+    responses:
+      200:
+        description: Login successful, returns JWT
+      401:
+        description: Invalid credentials
+    """
+    data = request.get_json()
+    username = data.get('username', '')
+    password = data.get('password', '')
+
+    conn = get_db_connection()
+    user = conn.execute('SELECT * FROM users WHERE username = ?', (username,)).fetchone()
+    conn.close()
+
+    if user and check_password_hash(user['password'], password):
+        token = jwt.encode({
+            'user_id': user['id'],
+            'exp': datetime.utcnow() + timedelta(hours=24)
+        }, app.config['JWT_SECRET'], algorithm=app.config['JWT_ALGORITHM'])
+        
+        return api_response(data={'token': token, 'username': user['username']})
+    
+    return api_response(success=False, message='Invalid credentials', code=401)
+
+@app.route('/api/expenses', methods=['GET'])
+@token_required
+def api_get_expenses(current_user_id):
+    """
+    Get all expenses for the current user
+    ---
+    security:
+      - Bearer: []
+    responses:
+      200:
+        description: A list of expenses
+    """
+    conn = get_db_connection()
+    expenses = conn.execute('SELECT * FROM expenses WHERE user_id = ? ORDER BY date DESC', (current_user_id,)).fetchall()
+    conn.close()
+    return api_response(data=[dict(exp) for exp in expenses])
+
+@app.route('/api/expenses', methods=['POST'])
+@token_required
+def api_add_expense(current_user_id):
+    """
+    Add a new expense
+    ---
+    security:
+      - Bearer: []
+    parameters:
+      - name: body
+        in: body
+        required: true
+        schema:
+          type: object
+          properties:
+            amount:
+              type: number
+            currency:
+              type: string
+            category:
+              type: string
+            description:
+              type: string
+            date:
+              type: string
+    responses:
+      201:
+        description: Expense created successfully
+    """
+    data = request.get_json()
+    amount = float(data.get('amount', 0))
+    currency = data.get('currency', 'USD')
+    category = data.get('category', 'Other')
+    description = data.get('description', '')
+    date = data.get('date', datetime.now().strftime('%Y-%m-%d'))
+
+    amount_usd = convert_to_usd(amount, currency)
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        '''INSERT INTO expenses (user_id, amount, currency, amount_usd, category, description, date) 
+           VALUES (?, ?, ?, ?, ?, ?, ?)''',
+        (current_user_id, amount, currency, amount_usd, category, description, date)
+    )
+    conn.commit()
+    expense_id = cursor.lastrowid
+    conn.close()
+
+    return api_response(data={'id': expense_id}, message='Expense created successfully', code=201)
+
+@app.route('/api/expenses/<int:expense_id>', methods=['PUT'])
+@token_required
+def api_update_expense(current_user_id, expense_id):
+    """
+    Update an existing expense
+    ---
+    security:
+      - Bearer: []
+    parameters:
+      - name: expense_id
+        in: path
+        required: true
+        type: integer
+      - name: body
+        in: body
+        required: true
+        schema:
+          type: object
+          properties:
+            amount:
+              type: number
+            currency:
+              type: string
+            category:
+              type: string
+            description:
+              type: string
+            date:
+              type: string
+    responses:
+      200:
+        description: Expense updated successfully
+    """
+    data = request.get_json()
+    conn = get_db_connection()
+    
+    # Check ownership
+    expense = conn.execute('SELECT * FROM expenses WHERE id = ? AND user_id = ?', (expense_id, current_user_id)).fetchone()
+    if not expense:
+        conn.close()
+        return api_response(success=False, message='Expense not found', code=404)
+
+    amount = float(data.get('amount', expense['amount']))
+    currency = data.get('currency', expense['currency'])
+    category = data.get('category', expense['category'])
+    description = data.get('description', expense['description'])
+    date = data.get('date', expense['date'])
+    amount_usd = convert_to_usd(amount, currency)
+
+    conn.execute(
+        '''UPDATE expenses SET amount=?, currency=?, amount_usd=?, category=?, description=?, date=? 
+           WHERE id=? AND user_id=?''',
+        (amount, currency, amount_usd, category, description, date, expense_id, current_user_id)
+    )
+    conn.commit()
+    conn.close()
+    return api_response(message='Expense updated successfully')
+
+@app.route('/api/expenses/<int:expense_id>', methods=['DELETE'])
+@token_required
+def api_delete_expense(current_user_id, expense_id):
+    """
+    Delete an expense
+    ---
+    security:
+      - Bearer: []
+    parameters:
+      - name: expense_id
+        in: path
+        required: true
+        type: integer
+    responses:
+      200:
+        description: Expense deleted successfully
+    """
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute('DELETE FROM expenses WHERE id = ? AND user_id = ?', (expense_id, current_user_id))
+    if cursor.rowcount == 0:
+        conn.close()
+        return api_response(success=False, message='Expense not found', code=404)
+    conn.commit()
+    conn.close()
+    return api_response(message='Expense deleted successfully')
+
+@app.route('/api/budgets', methods=['GET'])
+@token_required
+def api_get_budgets(current_user_id):
+    """
+    Get all budgets for the current user
+    ---
+    security:
+      - Bearer: []
+    responses:
+      200:
+        description: A list of budgets
+    """
+    conn = get_db_connection()
+    budgets = conn.execute('SELECT * FROM budgets WHERE user_id = ?', (current_user_id,)).fetchall()
+    conn.close()
+    return api_response(data=[dict(b) for b in budgets])
+
+@app.route('/api/budgets', methods=['POST'])
+@token_required
+def api_add_budget(current_user_id):
+    """
+    Add a new budget
+    ---
+    security:
+      - Bearer: []
+    parameters:
+      - name: body
+        in: body
+        required: true
+        schema:
+          type: object
+          properties:
+            category:
+              type: string
+            amount:
+              type: number
+            currency:
+              type: string
+            period:
+              type: string
+            start_date:
+              type: string
+    responses:
+      201:
+        description: Budget created successfully
+    """
+    data = request.get_json()
+    category = data.get('category')
+    amount = float(data.get('amount', 0))
+    currency = data.get('currency', 'USD')
+    period = data.get('period', 'monthly')
+    start_date = data.get('start_date', datetime.now().strftime('%Y-%m-%d'))
+    amount_usd = convert_to_usd(amount, currency)
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        '''INSERT INTO budgets (user_id, category, amount, currency, amount_usd, period, start_date)
+           VALUES (?, ?, ?, ?, ?, ?, ?)''',
+        (current_user_id, category, amount, currency, amount_usd, period, start_date)
+    )
+    conn.commit()
+    budget_id = cursor.lastrowid
+    conn.close()
+    return api_response(data={'id': budget_id}, message='Budget created successfully', code=201)
+
+@app.route('/api/categories', methods=['GET'])
+@token_required
+def api_get_categories(current_user_id):
+    """
+    Get all categories for the current user
+    ---
+    security:
+      - Bearer: []
+    responses:
+      200:
+        description: A list of categories
+    """
+    categories = get_user_categories(current_user_id)
+    return api_response(data=categories)
+
+@app.route('/api/categories', methods=['POST'])
+@token_required
+def api_add_category(current_user_id, ):
+    """
+    Add a new category
+    ---
+    security:
+      - Bearer: []
+    parameters:
+      - name: body
+        in: body
+        required: true
+        schema:
+          type: object
+          properties:
+            name:
+              type: string
+            icon:
+              type: string
+            color:
+              type: string
+    responses:
+      201:
+        description: Category created successfully
+    """
+    data = request.get_json()
+    name = data.get('name', '').strip()
+    icon = data.get('icon', '💰')
+    color = data.get('color', '#6c757d')
+
+    if not name:
+        return api_response(success=False, message='Name is required', code=400)
+
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            'INSERT INTO categories (user_id, name, icon, color) VALUES (?, ?, ?, ?)',
+            (current_user_id, name, icon, color)
+        )
+        conn.commit()
+        return api_response(data={'id': cursor.lastrowid}, message='Category created successfully', code=201)
+    except sqlite3.IntegrityError:
+        return api_response(success=False, message='Category already exists', code=400)
+    finally:
+        conn.close()
+
+@app.route('/api/groups', methods=['GET'])
+@token_required
+def api_get_groups(current_user_id):
+    """
+    Get all groups the current user belongs to
+    ---
+    security:
+      - Bearer: []
+    responses:
+      200:
+        description: A list of groups
+    """
+    conn = get_db_connection()
+    user_groups = conn.execute('''
+        SELECT g.id, g.name, COUNT(m.user_id) as member_count 
+        FROM groups g
+        JOIN group_members m ON g.id = m.group_id
+        WHERE m.user_id = ?
+        GROUP BY g.id
+    ''', (current_user_id,)).fetchall()
+    conn.close()
+    return api_response(data=[dict(g) for g in user_groups])
+
+@app.route('/api/groups', methods=['POST'])
+@token_required
+def api_create_group(current_user_id):
+    """
+    Create a new group
+    ---
+    security:
+      - Bearer: []
+    parameters:
+      - name: body
+        in: body
+        required: true
+        schema:
+          type: object
+          properties:
+            name:
+              type: string
+    responses:
+      201:
+        description: Group created successfully
+    """
+    data = request.get_json()
+    group_name = data.get('name')
+    if not group_name:
+        return api_response(success=False, message='Group name is required', code=400)
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute('INSERT INTO groups (name, created_by, created_at) VALUES (?, ?, ?)',
+                   (group_name, current_user_id, datetime.now()))
+    group_id = cursor.lastrowid
+    
+    # Add creator as first member
+    cursor.execute('INSERT INTO group_members (group_id, user_id, joined_at) VALUES (?, ?, ?)',
+                   (group_id, current_user_id, datetime.now()))
+    conn.commit()
+    conn.close()
+    return api_response(data={'id': group_id}, message='Group created successfully', code=201)
 
 # --- ROUTES ---
 
@@ -495,22 +908,10 @@ def add_category():
         
         conn = get_db_connection()
         try:
-            cursor = conn.execute(
+            conn.execute(
                 'INSERT INTO categories (user_id, name, icon, color) VALUES (?, ?, ?, ?)',
                 (session['user_id'], name, icon, color)
             )
-            category_id = cursor.lastrowid
-            
-            # Log audit entry
-            new_values = {
-                'id': category_id,
-                'user_id': session['user_id'],
-                'name': name,
-                'icon': icon,
-                'color': color
-            }
-            log_audit_entry(conn, session['user_id'], 'category', category_id, 'INSERT', new_values=new_values)
-            
             conn.commit()
             flash('Category added successfully!')
             return redirect(url_for('categories'))
@@ -542,9 +943,6 @@ def edit_category(category_id):
         
         conn = get_db_connection()
         try:
-            # Capture old state before update
-            old_values = get_current_state(conn, 'category', category_id, session['user_id'])
-            
             # Update category name in expenses if name changed
             if name != category['name']:
                 conn.execute(
@@ -560,18 +958,6 @@ def edit_category(category_id):
                 'UPDATE categories SET name = ?, icon = ?, color = ? WHERE id = ? AND user_id = ?',
                 (name, icon, color, category_id, session['user_id'])
             )
-            
-            # Log audit entry
-            new_values = {
-                'id': category_id,
-                'user_id': session['user_id'],
-                'name': name,
-                'icon': icon,
-                'color': color
-            }
-            log_audit_entry(conn, session['user_id'], 'category', category_id, 'UPDATE',
-                           old_values=old_values, new_values=new_values)
-            
             conn.commit()
             flash('Category updated successfully!')
             return redirect(url_for('categories'))
@@ -604,15 +990,7 @@ def delete_category(category_id):
         flash(f'Cannot delete "{category["name"]}" - it has {expense_count} expense(s). Please reassign them first.')
         return redirect(url_for('categories'))
     
-    # Capture old state before deletion
-    old_values = dict_from_row(category)
-    
     conn.execute('DELETE FROM categories WHERE id = ? AND user_id = ?', (category_id, session['user_id']))
-    
-    # Log audit entry
-    if old_values:
-        log_audit_entry(conn, session['user_id'], 'category', category_id, 'DELETE', old_values=old_values)
-    
     conn.commit()
     conn.close()
     
@@ -825,26 +1203,11 @@ def add_expense():
         amount_usd = convert_to_usd(amount, currency)
 
         conn = get_db_connection()
-        cursor = conn.execute(
+        conn.execute(
             '''INSERT INTO expenses (user_id, amount, currency, amount_usd, category, description, date) 
                VALUES (?, ?, ?, ?, ?, ?, ?)''',
             (session['user_id'], amount, currency, amount_usd, category, description, date)
         )
-        expense_id = cursor.lastrowid
-        
-        # Log audit entry
-        new_values = {
-            'id': expense_id,
-            'user_id': session['user_id'],
-            'amount': amount,
-            'currency': currency,
-            'amount_usd': amount_usd,
-            'category': category,
-            'description': description,
-            'date': date
-        }
-        log_audit_entry(conn, session['user_id'], 'expense', expense_id, 'INSERT', new_values=new_values)
-        
         conn.commit()
         conn.close()
         
@@ -862,9 +1225,6 @@ def edit_expense(expense_id):
     conn = get_db_connection()
 
     if request.method == 'POST':
-        # Capture old state before update
-        old_values = get_current_state(conn, 'expense', expense_id, session['user_id'])
-        
         amount = float(request.form['amount'])
         currency = request.form.get('currency')
         category = request.form['category']
@@ -877,21 +1237,6 @@ def edit_expense(expense_id):
                WHERE id=? AND user_id=?''',
             (amount, currency, amount_usd, category, description, date, expense_id, session['user_id'])
         )
-        
-        # Log audit entry with old and new values
-        new_values = {
-            'id': expense_id,
-            'user_id': session['user_id'],
-            'amount': amount,
-            'currency': currency,
-            'amount_usd': amount_usd,
-            'category': category,
-            'description': description,
-            'date': date
-        }
-        log_audit_entry(conn, session['user_id'], 'expense', expense_id, 'UPDATE', 
-                       old_values=old_values, new_values=new_values)
-        
         conn.commit()
         conn.close()
         flash('Expense updated successfully!')
@@ -915,19 +1260,10 @@ def delete_expense(expense_id):
         return redirect(url_for('login'))
     
     conn = get_db_connection()
-    
-    # Capture old state before deletion
-    old_values = get_current_state(conn, 'expense', expense_id, session['user_id'])
-    
     conn.execute(
         'DELETE FROM expenses WHERE id = ? AND user_id = ?',
         (expense_id, session['user_id'])
     )
-    
-    # Log audit entry
-    if old_values:
-        log_audit_entry(conn, session['user_id'], 'expense', expense_id, 'DELETE', old_values=old_values)
-    
     conn.commit()
     conn.close()
     
@@ -1263,26 +1599,11 @@ def add_budget():
             user_categories = get_user_categories(session['user_id'])
             return render_template('add_budget.html', categories=user_categories)
 
-        cursor = conn.execute(
+        conn.execute(
             '''INSERT INTO budgets (user_id, category, amount, currency, amount_usd, period, start_date)
                VALUES (?, ?, ?, ?, ?, ?, ?)''',
             (session['user_id'], category, amount, currency, amount_usd, period, start_date)
         )
-        budget_id = cursor.lastrowid
-        
-        # Log audit entry
-        new_values = {
-            'id': budget_id,
-            'user_id': session['user_id'],
-            'category': category,
-            'amount': amount,
-            'currency': currency,
-            'amount_usd': amount_usd,
-            'period': period,
-            'start_date': start_date
-        }
-        log_audit_entry(conn, session['user_id'], 'budget', budget_id, 'INSERT', new_values=new_values)
-        
         conn.commit()
         conn.close()
         flash('Budget added successfully!')
@@ -1297,9 +1618,6 @@ def edit_budget(budget_id):
 
     conn = get_db_connection()
     if request.method == 'POST':
-        # Capture old state before update
-        old_values = get_current_state(conn, 'budget', budget_id, session['user_id'])
-        
         amount = float(request.form['amount'])
         currency = request.form.get('currency')
         period = request.form['period']
@@ -1311,22 +1629,6 @@ def edit_budget(budget_id):
                WHERE id=? AND user_id=?''',
             (amount, currency, amount_usd, period, start_date, budget_id, session['user_id'])
         )
-        
-        # Log audit entry
-        budget = conn.execute('SELECT * FROM budgets WHERE id=?', (budget_id,)).fetchone()
-        new_values = {
-            'id': budget_id,
-            'user_id': session['user_id'],
-            'category': budget['category'],
-            'amount': amount,
-            'currency': currency,
-            'amount_usd': amount_usd,
-            'period': period,
-            'start_date': start_date
-        }
-        log_audit_entry(conn, session['user_id'], 'budget', budget_id, 'UPDATE',
-                       old_values=old_values, new_values=new_values)
-        
         conn.commit()
         conn.close()
         flash('Budget updated successfully!')
@@ -1346,16 +1648,7 @@ def delete_budget(budget_id):
         return redirect(url_for('login'))
     
     conn = get_db_connection()
-    
-    # Capture old state before deletion
-    old_values = get_current_state(conn, 'budget', budget_id, session['user_id'])
-    
     conn.execute('DELETE FROM budgets WHERE id=? AND user_id=?', (budget_id, session['user_id']))
-    
-    # Log audit entry
-    if old_values:
-        log_audit_entry(conn, session['user_id'], 'budget', budget_id, 'DELETE', old_values=old_values)
-    
     conn.commit()
     conn.close()
     flash('Budget deleted successfully!')
@@ -1853,183 +2146,6 @@ def delete_group_expense(group_id, expense_id):
     
     flash('Expense deleted successfully!')
     return redirect(url_for('group_detail', group_id=group_id))
-
-# --- AUDIT LOG ROUTES ---
-
-@app.route('/activity_log')
-def activity_log():
-    if 'user_id' not in session:
-        return redirect(url_for('login'))
-    
-    # Get filter parameters
-    entity_type = request.args.get('entity_type', '')
-    action = request.args.get('action', '')
-    date_from = request.args.get('date_from', '')
-    date_to = request.args.get('date_to', '')
-    page = int(request.args.get('page', 1))
-    per_page = 20
-    
-    # Build query
-    query = 'SELECT * FROM audit_logs WHERE user_id = ?'
-    params = [session['user_id']]
-    
-    if entity_type:
-        query += ' AND entity_type = ?'
-        params.append(entity_type)
-    
-    if action:
-        query += ' AND action = ?'
-        params.append(action)
-    
-    if date_from:
-        query += ' AND timestamp >= ?'
-        params.append(date_from + ' 00:00:00')
-    
-    if date_to:
-        query += ' AND timestamp <= ?'
-        params.append(date_to + ' 23:59:59')
-    
-    # Count total entries
-    conn = get_db_connection()
-    count_query = query.replace('SELECT *', 'SELECT COUNT(*)')
-    total_entries = conn.execute(count_query, params).fetchone()[0]
-    total_pages = (total_entries + per_page - 1) // per_page
-    
-    # Add pagination
-    query += ' ORDER BY timestamp DESC LIMIT ? OFFSET ?'
-    params.extend([per_page, (page - 1) * per_page])
-    
-    # Fetch logs
-    logs = conn.execute(query, params).fetchall()
-    conn.close()
-    
-    # Parse JSON values
-    parsed_logs = []
-    for log in logs:
-        log_dict = dict(log)
-        try:
-            log_dict['old_values'] = json.loads(log['old_values']) if log['old_values'] else None
-            log_dict['new_values'] = json.loads(log['new_values']) if log['new_values'] else None
-        except json.JSONDecodeError:
-            log_dict['old_values'] = None
-            log_dict['new_values'] = None
-        parsed_logs.append(log_dict)
-    
-    filters = {
-        'entity_type': entity_type,
-        'action': action,
-        'date_from': date_from,
-        'date_to': date_to
-    }
-    
-    return render_template('activity_log.html', 
-                          logs=parsed_logs, 
-                          filters=filters,
-                          page=page,
-                          total_pages=total_pages,
-                          total_entries=total_entries)
-
-@app.route('/revert_change/<int:audit_id>', methods=['POST'])
-def revert_change(audit_id):
-    if 'user_id' not in session:
-        return redirect(url_for('login'))
-    
-    conn = get_db_connection()
-    
-    # Fetch audit log entry
-    audit_log = conn.execute(
-        'SELECT * FROM audit_logs WHERE id = ? AND user_id = ?',
-        (audit_id, session['user_id'])
-    ).fetchone()
-    
-    if not audit_log:
-        conn.close()
-        flash('Audit log entry not found!')
-        return redirect(url_for('activity_log'))
-    
-    try:
-        entity_type = audit_log['entity_type']
-        entity_id = audit_log['entity_id']
-        action = audit_log['action']
-        
-        table_map = {
-            'expense': 'expenses',
-            'budget': 'budgets',
-            'category': 'categories'
-        }
-        table = table_map.get(entity_type)
-        
-        if not table:
-            flash('Unknown entity type!')
-            conn.close()
-            return redirect(url_for('activity_log'))
-        
-        if action == 'UPDATE':
-            # Restore old values
-            old_values = json.loads(audit_log['old_values'])
-            
-            # Build UPDATE query dynamically
-            set_clause = ', '.join([f'{key} = ?' for key in old_values.keys() if key not in ['id', 'user_id']])
-            values = [old_values[key] for key in old_values.keys() if key not in ['id', 'user_id']]
-            values.extend([entity_id, session['user_id']])
-            
-            conn.execute(
-                f'UPDATE {table} SET {set_clause} WHERE id = ? AND user_id = ?',
-                values
-            )
-            
-            # Log the revert action
-            new_state = get_current_state(conn, entity_type, entity_id, session['user_id'])
-            log_audit_entry(conn, session['user_id'], entity_type, entity_id, 'UPDATE',
-                           old_values=json.loads(audit_log['new_values']), new_values=new_state)
-            
-            flash(f'{entity_type.capitalize()} reverted to previous state successfully!')
-            
-        elif action == 'DELETE':
-            # Re-insert the deleted entity
-            old_values = json.loads(audit_log['old_values'])
-            
-            # Remove id to let database auto-increment
-            insert_values = {k: v for k, v in old_values.items() if k != 'id'}
-            columns = ', '.join(insert_values.keys())
-            placeholders = ', '.join(['?' for _ in insert_values])
-            
-            cursor = conn.execute(
-                f'INSERT INTO {table} ({columns}) VALUES ({placeholders})',
-                list(insert_values.values())
-            )
-            new_id = cursor.lastrowid
-            
-            # Log the revert action
-            new_values = get_current_state(conn, entity_type, new_id, session['user_id'])
-            log_audit_entry(conn, session['user_id'], entity_type, new_id, 'INSERT', new_values=new_values)
-            
-            flash(f'Deleted {entity_type} restored successfully!')
-            
-        elif action == 'INSERT':
-            # Delete the inserted entity
-            old_state = get_current_state(conn, entity_type, entity_id, session['user_id'])
-            
-            conn.execute(
-                f'DELETE FROM {table} WHERE id = ? AND user_id = ?',
-                (entity_id, session['user_id'])
-            )
-            
-            # Log the revert action
-            if old_state:
-                log_audit_entry(conn, session['user_id'], entity_type, entity_id, 'DELETE', old_values=old_state)
-            
-            flash(f'{entity_type.capitalize()} creation reverted (deleted) successfully!')
-        
-        conn.commit()
-        
-    except Exception as e:
-        conn.rollback()
-        flash(f'Error reverting change: {str(e)}')
-    finally:
-        conn.close()
-    
-    return redirect(url_for('activity_log'))
 
 if __name__ == '__main__':
     init_db()
