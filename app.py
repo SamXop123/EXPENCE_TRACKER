@@ -139,6 +139,61 @@ def api_response(success=True, data=None, message=None, code=200):
         response['message'] = message
     return jsonify(response), code
 
+# --- GROUP RBAC HELPERS & DECORATORS ---
+def get_user_group_role(user_id, group_id):
+    """Get user's role in a specific group"""
+    conn = get_db_connection()
+    member = conn.execute(
+        'SELECT role FROM group_members WHERE group_id = ? AND user_id = ?',
+        (group_id, user_id)
+    ).fetchone()
+    conn.close()
+    return member['role'] if member else None
+
+def require_group_role(*allowed_roles):
+    """Decorator to check if user has required role in group
+    
+    Usage: @require_group_role('admin', 'owner')
+    
+    Roles hierarchy (from lowest to highest):
+    viewer < editor < admin < owner
+    
+    If user has a higher role than required, access is granted.
+    """
+    def decorator(f):
+        @wraps(f)
+        def decorated_function(group_id, *args, **kwargs):
+            # Check user is logged in
+            if 'user_id' not in session:
+                flash("Please log in to access this page.")
+                return redirect(url_for('login'))
+            
+            # Get user's role in group
+            conn = get_db_connection()
+            member = conn.execute(
+                'SELECT role FROM group_members WHERE group_id = ? AND user_id = ?',
+                (group_id, session['user_id'])
+            ).fetchone()
+            conn.close()
+            
+            # Check membership
+            if not member:
+                flash("You are not a member of this group.")
+                return redirect(url_for('groups'))
+            
+            # Define role hierarchy
+            role_hierarchy = {'viewer': 1, 'editor': 2, 'admin': 3, 'owner': 4}
+            user_role_level = role_hierarchy.get(member['role'], 0)
+            required_level = min(role_hierarchy.get(role, 999) for role in allowed_roles)
+            
+            if user_role_level < required_level:
+                flash(f"You need {allowed_roles[0]} permissions for this action.")
+                return redirect(url_for('group_detail', group_id=group_id))
+            
+            return f(group_id, *args, **kwargs)
+        return decorated_function
+    return decorator
+
 def init_db():
     conn = get_db_connection()
     
@@ -273,6 +328,27 @@ def init_db():
             FOREIGN KEY (user_id) REFERENCES users (id)
         )
     ''')
+    
+    # [MIGRATION] Add role column to group_members if it doesn't exist
+    cursor = conn.cursor()
+    cursor.execute("PRAGMA table_info(group_members)")
+    columns = [info[1] for info in cursor.fetchall()]
+    if 'role' not in columns:
+        print("Migrating DB: Adding role column to group_members table...")
+        conn.execute('ALTER TABLE group_members ADD COLUMN role TEXT NOT NULL DEFAULT "editor"')
+        
+        # Update existing members: set role based on group ownership
+        # Group creators get 'owner' role
+        conn.execute('''
+            UPDATE group_members 
+            SET role = 'owner' 
+            WHERE EXISTS (
+                SELECT 1 FROM groups 
+                WHERE groups.id = group_members.group_id 
+                AND groups.created_by = group_members.user_id
+            )
+        ''')
+        print("Migrated existing group members with appropriate roles.")
     
     conn.commit()
     conn.close()
@@ -2203,12 +2279,13 @@ def create_group():
                    (group_name, session['user_id'], datetime.now()))
     group_id = cursor.lastrowid
     
-    # Add creator as first member
-    cursor.execute('INSERT INTO group_members (group_id, user_id, joined_at) VALUES (?, ?, ?)',
-                   (group_id, session['user_id'], datetime.now()))
+    # Add creator as first member with 'owner' role
+    cursor.execute('INSERT INTO group_members (group_id, user_id, joined_at, role) VALUES (?, ?, ?, ?)',
+                   (group_id, session['user_id'], datetime.now(), 'owner'))
     conn.commit()
     conn.close()
     
+    flash('Group created successfully!')
     return redirect(url_for('group_detail', group_id=group_id))
 
 @app.route('/group/<int:group_id>')
@@ -2244,25 +2321,34 @@ def group_detail(group_id):
         WHERE group_id = ? ORDER BY date DESC
     ''', (group_id,)).fetchall()
     
-    # Get Members (For 'Paid By' list)
+    # Get Members (For 'Paid By' list and display with roles)
     members = conn.execute('''
-        SELECT u.id, u.username, u.email 
+        SELECT u.id, u.username, u.email, gm.role 
         FROM group_members gm 
         JOIN users u ON gm.user_id = u.id 
         WHERE group_id = ?
     ''', (group_id,)).fetchall()
     
+    # Get current user's role in the group
+    user_role = get_user_group_role(session['user_id'], group_id)
+    
     conn.close()
     
     debts = calculate_group_debts(group_id)
-    return render_template('group_detail.html', group=group, expenses=expenses, members=members, debts=debts, creator_username=creator_username)
+    return render_template('group_detail.html', group=group, expenses=expenses, members=members, debts=debts, creator_username=creator_username, user_role=user_role)
 
 @app.route('/group/<int:group_id>/add_member', methods=['POST'])
+@require_group_role('admin', 'owner')
 def add_member(group_id):
-    if 'user_id' not in session: 
-        return redirect(url_for('login'))
     
     username = request.form['username']
+    new_member_role = request.form.get('role', 'editor')  # Allow admins to assign roles
+    
+    # Validate role
+    valid_roles = ['viewer', 'editor', 'admin', 'owner']
+    if new_member_role not in valid_roles:
+        new_member_role = 'editor'
+    
     conn = get_db_connection()
     
     # NEW LOGIC: Check by username. If not exists, CREATE IT.
@@ -2282,10 +2368,10 @@ def add_member(group_id):
         user_id = user['id']
         flash(f'Added "{username}" to group!')
     
-    # Add to group
+    # Add to group with specified role
     try:
-        conn.execute('INSERT INTO group_members (group_id, user_id, joined_at) VALUES (?, ?, ?)',
-                     (group_id, user_id, datetime.now()))
+        conn.execute('INSERT INTO group_members (group_id, user_id, joined_at, role) VALUES (?, ?, ?, ?)',
+                     (group_id, user_id, datetime.now(), new_member_role))
         conn.commit()
     except sqlite3.IntegrityError:
         flash('User already in group.')
@@ -2294,9 +2380,8 @@ def add_member(group_id):
     return redirect(url_for('group_detail', group_id=group_id))
 
 @app.route('/group/<int:group_id>/add_expense', methods=['POST'])
+@require_group_role('editor', 'admin', 'owner')
 def add_group_expense(group_id):
-    if 'user_id' not in session: 
-        return redirect(url_for('login'))
     
     amount = float(request.form['amount'])
     desc = request.form['description']
@@ -2323,9 +2408,8 @@ def add_group_expense(group_id):
     return redirect(url_for('group_detail', group_id=group_id))
 
 @app.route('/group/<int:group_id>/settle_up', methods=['POST'])
+@require_group_role('editor', 'admin', 'owner')
 def settle_up(group_id):
-    if 'user_id' not in session: 
-        return redirect(url_for('login'))
     
     payer_id = int(request.form['from_id']) # Debtor
     receiver_id = int(request.form['to_id']) # Creditor
@@ -2351,21 +2435,12 @@ def settle_up(group_id):
     return redirect(url_for('group_detail', group_id=group_id))
 
 @app.route('/group/<int:group_id>/delete', methods=['POST'])
+@require_group_role('owner')
 def delete_group(group_id):
-    if 'user_id' not in session: 
-        return redirect(url_for('login'))
     
     conn = get_db_connection()
     
-    # Check if user is creator/admin of the group
-    group = conn.execute('SELECT created_by FROM groups WHERE id = ?', (group_id,)).fetchone()
-    
-    if not group or group['created_by'] != session['user_id']:
-        flash('Only the group creator can delete this group.')
-        conn.close()
-        return redirect(url_for('group_detail', group_id=group_id))
-    
-    # Delete cascade
+    # Delete cascade (decorator already verified owner permission)
     conn.execute('DELETE FROM expense_splits WHERE expense_id IN (SELECT id FROM group_expenses WHERE group_id = ?)', (group_id,))
     conn.execute('DELETE FROM group_expenses WHERE group_id = ?', (group_id,))
     conn.execute('DELETE FROM group_members WHERE group_id = ?', (group_id,))
@@ -2383,7 +2458,18 @@ def delete_group_expense(group_id, expense_id):
     
     conn = get_db_connection()
     
-    # Check if expense belongs to group and user is creator or payer
+    # Check if user is a member
+    member = conn.execute(
+        'SELECT role FROM group_members WHERE group_id = ? AND user_id = ?',
+        (group_id, session['user_id'])
+    ).fetchone()
+    
+    if not member:
+        flash("You are not a member of this group.")
+        conn.close()
+        return redirect(url_for('groups'))
+    
+    # Check if expense belongs to group
     expense = conn.execute('SELECT group_id, payer_id FROM group_expenses WHERE id = ?', (expense_id,)).fetchone()
     
     if not expense or expense['group_id'] != group_id:
@@ -2391,12 +2477,15 @@ def delete_group_expense(group_id, expense_id):
         conn.close()
         return redirect(url_for('group_detail', group_id=group_id))
     
-    if expense['payer_id'] != session['user_id']:
-        group = conn.execute('SELECT created_by FROM groups WHERE id = ?', (group_id,)).fetchone()
-        if group['created_by'] != session['user_id']:
-            flash('Only the payer or group creator can delete this expense.')
-            conn.close()
-            return redirect(url_for('group_detail', group_id=group_id))
+    # Permission check: payer can always delete their expense, admin/owner can delete any
+    user_role = member['role']
+    is_payer = expense['payer_id'] == session['user_id']
+    is_admin_or_owner = user_role in ['admin', 'owner']
+    
+    if not (is_payer or is_admin_or_owner):
+        flash('Only the payer, admin, or owner can delete this expense.')
+        conn.close()
+        return redirect(url_for('group_detail', group_id=group_id))
     
     # Delete expense and splits
     conn.execute('DELETE FROM expense_splits WHERE expense_id = ?', (expense_id,))
@@ -2407,36 +2496,105 @@ def delete_group_expense(group_id, expense_id):
     flash('Expense deleted successfully!')
     return redirect(url_for('group_detail', group_id=group_id))
 
-@app.route('/activity_log')
-def activity_log():
-    if 'user_id' not in session:
-        return redirect(url_for('login'))
-    
+@app.route('/group/<int:group_id>/remove_member/<int:member_id>', methods=['POST'])
+@require_group_role('admin', 'owner')
+def remove_member(group_id, member_id):
+    """Remove a member from group (admin+ only, cannot remove owner)"""
     conn = get_db_connection()
-    user_id = session['user_id']
     
-    # Fetch recent expenses and budgets to show as "activity"
-    # We decrypt the descriptions so they are readable
-    activities = conn.execute('''
-        SELECT 'Expense' as type, description, amount, currency, date, category 
-        FROM expenses WHERE user_id = ?
-        UNION ALL
-        SELECT 'Budget' as type, category as description, amount, currency, start_date as date, category
-        FROM budgets WHERE user_id = ?
-        ORDER BY date DESC LIMIT 50
-    ''', (user_id, user_id)).fetchall()
+    # Check if the member being removed is the owner
+    member = conn.execute(
+        'SELECT role FROM group_members WHERE group_id = ? AND user_id = ?',
+        (group_id, member_id)
+    ).fetchone()
     
+    if not member:
+        flash('Member not found in this group.')
+        conn.close()
+        return redirect(url_for('group_detail', group_id=group_id))
+    
+    if member['role'] == 'owner':
+        flash('Cannot remove the group owner. Transfer ownership first.')
+        conn.close()
+        return redirect(url_for('group_detail', group_id=group_id))
+    
+    # Remove member
+    conn.execute('DELETE FROM group_members WHERE group_id = ? AND user_id = ?', (group_id, member_id))
+    conn.commit()
     conn.close()
     
-    # Decrypt descriptions for the view
-    activity_list = []
-    for row in activities:
-        act = dict(row)
-        if act['type'] == 'Expense':
-            act['description'] = decrypt_data(act['description'])
-        activity_list.append(act)
+    flash('Member removed successfully!')
+    return redirect(url_for('group_detail', group_id=group_id))
+
+@app.route('/group/<int:group_id>/change_role/<int:member_id>', methods=['POST'])
+@require_group_role('owner')
+def change_member_role(group_id, member_id):
+    """Change a member's role (owner only)"""
+    new_role = request.form.get('role')
     
-    return render_template('activity_log.html', activities=activity_list)
+    # Validate role
+    valid_roles = ['viewer', 'editor', 'admin', 'owner']
+    if new_role not in valid_roles:
+        flash('Invalid role selected.')
+        return redirect(url_for('group_detail', group_id=group_id))
+    
+    conn = get_db_connection()
+    
+    # Cannot change own role
+    if member_id == session['user_id']:
+        flash('Cannot change your own role. Use transfer ownership instead.')
+        conn.close()
+        return redirect(url_for('group_detail', group_id=group_id))
+    
+    # Update role
+    conn.execute(
+        'UPDATE group_members SET role = ? WHERE group_id = ? AND user_id = ?',
+        (new_role, group_id, member_id)
+    )
+    conn.commit()
+    conn.close()
+    
+    flash(f'Member role updated to {new_role}!')
+    return redirect(url_for('group_detail', group_id=group_id))
+
+@app.route('/group/<int:group_id>/transfer_ownership/<int:new_owner_id>', methods=['POST'])
+@require_group_role('owner')
+def transfer_ownership(group_id, new_owner_id):
+    """Transfer ownership to another member (owner only)"""
+    conn = get_db_connection()
+    
+    # Check if new owner is a member
+    new_owner = conn.execute(
+        'SELECT user_id FROM group_members WHERE group_id = ? AND user_id = ?',
+        (group_id, new_owner_id)
+    ).fetchone()
+    
+    if not new_owner:
+        flash('Selected user is not a member of this group.')
+        conn.close()
+        return redirect(url_for('group_detail', group_id=group_id))
+    
+    # Transfer ownership: new member becomes owner, old owner becomes admin
+    conn.execute(
+        'UPDATE group_members SET role = ? WHERE group_id = ? AND user_id = ?',
+        ('admin', group_id, session['user_id'])
+    )
+    conn.execute(
+        'UPDATE group_members SET role = ? WHERE group_id = ? AND user_id = ?',
+        ('owner', group_id, new_owner_id)
+    )
+    
+    # Update group creator
+    conn.execute(
+        'UPDATE groups SET created_by = ? WHERE id = ?',
+        (new_owner_id, group_id)
+    )
+    
+    conn.commit()
+    conn.close()
+    
+    flash('Ownership transferred successfully!')
+    return redirect(url_for('group_detail', group_id=group_id))
 
 if __name__ == '__main__':
     init_db()

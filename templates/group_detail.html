@@ -6,11 +6,17 @@
         <div>
             <h2>{{ group.name }}</h2>
             <small class="text-muted">Created by <strong>{{ creator_username }}</strong></small>
+            {% if user_role %}
+            <span
+                class="badge bg-{% if user_role == 'owner' %}warning text-dark{% elif user_role == 'admin' %}primary{% elif user_role == 'editor' %}success{% else %}secondary{% endif %} ms-2"
+                title="Your role in this group">{{ user_role|capitalize }}</span>
+            {% endif %}
         </div>
         <div class="d-flex gap-2">
             <a href="{{ url_for('groups') }}" class="btn btn-outline-secondary">&larr; Back</a>
-            {% if group.created_by == session.get('user_id') %}
-            <form action="{{ url_for('delete_group', group_id=group.id) }}" method="POST" class="d-inline" onsubmit="return confirm('Delete this group and all its data?');">
+            {% if user_role == 'owner' %}
+            <form action="{{ url_for('delete_group', group_id=group.id) }}" method="POST" class="d-inline"
+                onsubmit="return confirm('Delete this group and all its data?');">
                 <button type="submit" class="btn btn-outline-danger"><i class="fas fa-trash"></i> Delete Group</button>
             </form>
             {% endif %}
@@ -19,23 +25,27 @@
 
     <div class="row g-4">
         <div class="col-lg-8">
+            {% if user_role and user_role in ['editor', 'admin', 'owner'] %}
             <div class="card shadow-sm mb-4 border-0">
                 <div class="card-header bg-primary text-white">Add Expense</div>
                 <div class="card-body">
                     <form action="{{ url_for('add_group_expense', group_id=group.id) }}" method="POST" class="row g-2">
                         <div class="col-md-5">
-                            <input type="text" name="description" class="form-control" placeholder="Description" required>
+                            <input type="text" name="description" class="form-control" placeholder="Description"
+                                required>
                         </div>
                         <div class="col-md-3">
                             <div class="input-group">
                                 <span class="input-group-text">₹</span>
-                                <input type="number" step="0.01" name="amount" class="form-control" placeholder="0.00" required>
+                                <input type="number" step="0.01" name="amount" class="form-control" placeholder="0.00"
+                                    required>
                             </div>
                         </div>
                         <div class="col-md-4">
                             <select name="payer_id" class="form-select">
                                 {% for member in members %}
-                                <option value="{{ member.id }}" {% if member.id == session.user_id %}selected{% endif %}>Paid by {{ member.username }}</option>
+                                <option value="{{ member.id }}" {% if member.id==session.user_id %}selected{% endif %}>
+                                    Paid by {{ member.username }}</option>
                                 {% endfor %}
                             </select>
                         </div>
@@ -45,26 +55,36 @@
                     </form>
                 </div>
             </div>
+            {% else %}
+            <div class="alert alert-info">
+                <i class="fas fa-info-circle"></i> You have <strong>viewer-only</strong> access to this group. You can
+                see expenses but cannot add or modify them.
+            </div>
+            {% endif %}
 
             <div class="card shadow-sm border-0">
                 <div class="card-header bg-white fw-bold">Recent Activity</div>
                 <ul class="list-group list-group-flush">
                     {% for exp in expenses %}
-                    <li class="list-group-item d-flex justify-content-between align-items-start {% if exp.description == 'Settlement' %}bg-light{% endif %}">
+                    <li
+                        class="list-group-item d-flex justify-content-between align-items-start {% if exp.description == 'Settlement' %}bg-light{% endif %}">
                         <div class="flex-grow-1">
                             {% if exp.description == 'Settlement' %}
-                                <span class="badge bg-success me-2">PAID</span>
-                                <strong>{{ exp.payer_name }}</strong> paid
+                            <span class="badge bg-success me-2">PAID</span>
+                            <strong>{{ exp.payer_name }}</strong> paid
                             {% else %}
-                                <strong>{{ exp.description }}</strong>
-                                <div class="text-muted small">Added by {{ exp.payer_name }} • {{ exp.date }}</div>
+                            <strong>{{ exp.description }}</strong>
+                            <div class="text-muted small">Added by {{ exp.payer_name }} • {{ exp.date }}</div>
                             {% endif %}
                         </div>
                         <div class="text-end">
                             <div class="fw-bold">₹{{ exp.amount }}</div>
-                            {% if exp.payer_id == session.get('user_id') or group.created_by == session.get('user_id') %}
-                            <form action="{{ url_for('delete_group_expense', group_id=group.id, expense_id=exp.id) }}" method="POST" class="d-inline mt-2" onsubmit="return confirm('Delete this expense?');">
-                                <button type="submit" class="btn btn-sm btn-outline-danger"><i class="fas fa-trash"></i></button>
+                            {% if (exp.payer_id == session.get('user_id')) or (user_role and user_role in ['admin',
+                            'owner']) %}
+                            <form action="{{ url_for('delete_group_expense', group_id=group.id, expense_id=exp.id) }}"
+                                method="POST" class="d-inline mt-2" onsubmit="return confirm('Delete this expense?');">
+                                <button type="submit" class="btn btn-sm btn-outline-danger"><i
+                                        class="fas fa-trash"></i></button>
                             </form>
                             {% endif %}
                         </div>
@@ -79,43 +99,120 @@
                 <div class="card-header bg-white fw-bold">Group Members</div>
                 <ul class="list-group list-group-flush">
                     {% for member in members %}
-                    <li class="list-group-item">{{ member.username }}</li>
+                    <li class="list-group-item d-flex justify-content-between align-items-center">
+                        <div>
+                            <strong>{{ member.username }}</strong>
+                            {% if member.role %}
+                            <span
+                                class="badge bg-{% if member.role == 'owner' %}warning text-dark{% elif member.role == 'admin'%}primary{% elif member.role == 'editor' %}success{% else %}secondary{% endif %} ms-1">{{
+                                member.role }}</span>
+                            {% endif %}
+                        </div>
+                        <div>
+                            {% if user_role== 'owner' and member.id != session.get('user_id') %}
+                            <!-- Role Change Dropdown -->
+                            <div class="btn-group dropdown">
+                                <button class="btn btn-sm btn-outline-secondary dropdown-toggle" type="button"
+                                    data-bs-toggle="dropdown" aria-expanded="false">
+                                    <i class="fas fa-user-cog"></i>
+                                </button>
+                                <ul class="dropdown-menu">
+                                    <li>
+                                        <h6 class="dropdown-header">Change Role</h6>
+                                    </li>
+                                    {% for role in ['viewer', 'editor', 'admin', 'owner'] %}
+                                    <li>
+                                        <form
+                                            action="{{ url_for('change_member_role', group_id=group.id, member_id=member.id) }}"
+                                            method="POST" class="dropdown-item p-0">
+                                            <input type="hidden" name="role" value="{{ role }}">
+                                            <button type="submit"
+                                                class="btn btn-link dropdown-item text-decoration-none">{{
+                                                role|capitalize }}</button>
+                                        </form>
+                                    </li>
+                                    {% endfor %}
+                                    <li>
+                                        <hr class="dropdown-divider">
+                                    </li>
+                                    <li>
+                                        <form
+                                            action="{{ url_for('transfer_ownership', group_id=group.id, new_owner_id=member.id) }}"
+                                            method="POST" class="dropdown-item p-0"
+                                            onsubmit="return confirm('Transfer ownership to {{ member.username }}?');">
+                                            <button type="submit"
+                                                class="btn btn-link dropdown-item text-decoration-none text-warning">Make
+                                                Owner</button>
+                                        </form>
+                                    </li>
+                                </ul>
+                            </div>
+                            {% endif %}
+                            {% if user_role and user_role in ['admin', 'owner'] and member.role != 'owner' and member.id
+                            != session.get('user_id') %}
+                            <!-- Remove Member Button -->
+                            <form action="{{ url_for('remove_member', group_id=group.id, member_id=member.id) }}"
+                                method="POST" class="d-inline"
+                                onsubmit="return confirm('Remove {{ member.username }} from group?');">
+                                <button type="submit" class="btn btn-sm btn-outline-danger"><i
+                                        class="fas fa-user-minus"></i></button>
+                            </form>
+                            {% endif %}
+                        </div>
+                    </li>
                     {% endfor %}
                 </ul>
+                {% if user_role and user_role in ['admin', 'owner'] %}
                 <div class="card-body border-top">
                     <form action="{{ url_for('add_member', group_id=group.id) }}" method="POST">
-                        <div class="input-group">
+                        <div class="input-group mb-2">
                             <input type="text" name="username" class="form-control" placeholder="Username" required>
+                            <select name="role" class="form-select" style="max-width: 120px;">
+                                <option value="editor">Editor</option>
+                                <option value="viewer">Viewer</option>
+                                <option value="admin">Admin</option>
+                            </select>
                             <button class="btn btn-outline-primary" type="submit">Add</button>
                         </div>
                         <small class="text-muted">If user doesn't exist, they will be created.</small>
                     </form>
                 </div>
+                {% endif %}
             </div>
 
+            {% if user_role and user_role in ['editor', 'admin', 'owner'] %}
             <div class="card shadow-sm border-0">
                 <div class="card-header bg-warning text-dark fw-bold">Settlements</div>
                 <div class="card-body">
                     {% if debts %}
-                        {% for debt in debts %}
-                        <div class="p-3 mb-3 border rounded bg-white">
-                            <div class="d-flex justify-content-between align-items-center mb-2">
-                                <span><strong>{{ debt.from }}</strong> pays <strong>{{ debt.to }}</strong></span>
-                                <span class="text-danger fw-bold">₹{{ debt.amount }}</span>
-                            </div>
-                            <form action="{{ url_for('settle_up', group_id=group.id) }}" method="POST" class="d-flex gap-2">
-                                <input type="hidden" name="from_id" value="{{ debt.from_id }}">
-                                <input type="hidden" name="to_id" value="{{ debt.to_id }}">
-                                <input type="number" name="amount" class="form-control form-control-sm" placeholder="Amount" max="{{ debt.amount }}" step="0.01" required>
-                                <button type="submit" class="btn btn-sm btn-success">Done</button>
-                            </form>
+                    {% for debt in debts %}
+                    <div class="p-3 mb-3 border rounded bg-white">
+                        <div class="d-flex justify-content-between align-items-center mb-2">
+                            <span><strong>{{ debt.from }}</strong> pays <strong>{{ debt.to }}</strong></span>
+                            <span class="text-danger fw-bold">₹{{ debt.amount }}</span>
                         </div>
-                        {% endfor %}
+                        <form action="{{ url_for('settle_up', group_id=group.id) }}" method="POST" class="d-flex gap-2">
+                            <input type="hidden" name="from_id" value="{{ debt.from_id }}">
+                            <input type="hidden" name="to_id" value="{{ debt.to_id }}">
+                            <input type="number" name="amount" class="form-control form-control-sm" placeholder="Amount"
+                                max="{{ debt.amount }}" step="0.01" required>
+                            <button type="submit" class="btn btn-sm btn-success">Done</button>
+                        </form>
+                    </div>
+                    {% endfor %}
                     {% else %}
-                        <p class="text-center text-success mb-0">No pending payments!</p>
+                    <p class="text-center text-success mb-0">No pending payments!</p>
                     {% endif %}
                 </div>
             </div>
+            {% else %}
+            <div class="card shadow-sm border-0">
+                <div class="card-header bg-warning text-dark fw-bold">Settlements</div>
+                <div class="card-body">
+                    <p class="text-muted text-center mb-0">Viewer-only mode: You cannot settle payments.</p>
+                </div>
+            </div>
+            {% endif %}
         </div>
     </div>
 </div>
