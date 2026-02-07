@@ -9,6 +9,10 @@ import os
 import io
 import pandas as pd
 import jwt
+import pyotp
+import qrcode
+import io
+import base64
 from functools import wraps
 from flasgger import Swagger, swag_from
 from flask_limiter import Limiter
@@ -117,6 +121,14 @@ def init_db():
             password TEXT NOT NULL
         )
     ''')
+    
+    # [MIGRATION] Add totp_secret column if it doesn't exist
+    cursor = conn.cursor()
+    cursor.execute("PRAGMA table_info(users)")
+    columns = [info[1] for info in cursor.fetchall()]
+    if 'totp_secret' not in columns:
+        print("Migrating DB: Adding totp_secret to users table...")
+        conn.execute('ALTER TABLE users ADD COLUMN totp_secret TEXT')
     
     # Expenses Table (with multi-currency support)
     conn.execute('''
@@ -810,6 +822,8 @@ def index():
         return redirect(url_for('dashboard'))
     return render_template('index.html')
 
+# --- 2FA ROUTES ---
+
 @app.route('/signup', methods=['GET', 'POST'])
 @limiter.limit("5 per minute")
 def signup():
@@ -819,7 +833,6 @@ def signup():
         password = request.form.get('password', '')
         confirm_password = request.form.get('confirm_password', '')
         
-        # Validation
         if not username or not email or not password:
             flash('Please fill in all fields!')
             return render_template('signup.html')
@@ -827,30 +840,31 @@ def signup():
         if password != confirm_password:
             flash('Passwords do not match!')
             return render_template('signup.html')
-        
-        if len(password) < 4:
-            flash('Password must be at least 4 characters!')
-            return render_template('signup.html')
-        
+            
         conn = get_db_connection()
         try:
             hashed_password = generate_password_hash(password)
-            conn.execute(
-                'INSERT INTO users (username, email, password) VALUES (?, ?, ?)',
-                (username, email, hashed_password)
+            # Generate 2FA Secret immediately upon signup
+            totp_secret = pyotp.random_base32()
+            
+            cursor = conn.cursor()
+            cursor.execute(
+                'INSERT INTO users (username, email, password, totp_secret) VALUES (?, ?, ?, ?)',
+                (username, email, hashed_password, totp_secret)
             )
             conn.commit()
-            flash('Account created successfully! Please login.')
-            return redirect(url_for('login'))
+            user_id = cursor.lastrowid
+            
+            # Direct user to 2FA Setup instead of login
+            session['pre_2fa_id'] = user_id
+            flash('Account created! Please set up Two-Factor Authentication.')
+            return redirect(url_for('setup_2fa'))
+            
         except sqlite3.IntegrityError as e:
             if 'username' in str(e):
                 flash('Username already exists!')
-            elif 'email' in str(e):
-                flash('Email already exists!')
             else:
-                flash('Signup failed. Please try again.')
-        except Exception as e:
-            flash(f'Error: {str(e)}')
+                flash('Email already exists!')
         finally:
             conn.close()
     
@@ -868,13 +882,74 @@ def login():
         conn.close()
         
         if user and check_password_hash(user['password'], password):
-            session['user_id'] = user['id']
+            # Store ID in a temporary session variable
+            session['pre_2fa_id'] = user['id']
+            
+            # If user has no secret (legacy user), force setup. Otherwise verify.
+            if not user['totp_secret']:
+                return redirect(url_for('setup_2fa'))
+            else:
+                return redirect(url_for('verify_2fa'))
+        else:
+            flash('Invalid credentials!')
+            
+    return render_template('login.html')
+
+@app.route('/setup_2fa')
+def setup_2fa():
+    if 'pre_2fa_id' not in session:
+        return redirect(url_for('login'))
+    
+    conn = get_db_connection()
+    user = conn.execute('SELECT * FROM users WHERE id = ?', (session['pre_2fa_id'],)).fetchone()
+    
+    # Use existing secret or generate new one if missing
+    secret = user['totp_secret']
+    if not secret:
+        secret = pyotp.random_base32()
+        conn.execute('UPDATE users SET totp_secret = ? WHERE id = ?', (secret, user['id']))
+        conn.commit()
+    conn.close()
+    
+    # Generate QR Code
+    totp_uri = pyotp.totp.TOTP(secret).provisioning_uri(
+        name=user['email'], 
+        issuer_name='ExpenseTracker'
+    )
+    
+    img = qrcode.make(totp_uri)
+    buf = io.BytesIO()
+    img.save(buf)
+    buf.seek(0)
+    qr_b64 = base64.b64encode(buf.getvalue()).decode('utf-8')
+    
+    return render_template('setup_2fa.html', qr_code=qr_b64, secret=secret)
+
+@app.route('/verify_2fa', methods=['GET', 'POST'])
+def verify_2fa():
+    if 'pre_2fa_id' not in session:
+        return redirect(url_for('login'))
+        
+    if request.method == 'POST':
+        token = request.form.get('token')
+        
+        conn = get_db_connection()
+        user = conn.execute('SELECT * FROM users WHERE id = ?', (session['pre_2fa_id'],)).fetchone()
+        conn.close()
+        
+        totp = pyotp.TOTP(user['totp_secret'])
+        
+        if totp.verify(token):
+            # Success: Elevate to full session
+            session['user_id'] = session['pre_2fa_id']
             session['username'] = user['username']
+            session.pop('pre_2fa_id', None) # Clear temp ID
             flash('Logged in successfully!')
             return redirect(url_for('dashboard'))
         else:
-            flash('Invalid credentials!')
-    return render_template('login.html')
+            flash('Invalid 2FA Token. Please try again.')
+            
+    return render_template('verify_2fa.html')
 
 @app.route('/logout')
 def logout():

@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-md-6">
+        <div class="card shadow-sm text-center">
+            <div class="card-header">
+                <h4>Setup Two-Factor Authentication</h4>
+            </div>
+            <div class="card-body">
+                <p>Scan this QR code with your Authenticator App (Google Authenticator, Authy, etc.)</p>
+                
+                <img src="data:image/png;base64, {{ qr_code }}" alt="2FA QR Code" class="img-fluid mb-3" style="max-width: 250px;">
+                
+                <div class="alert alert-warning">
+                    <strong>Manual Entry Key:</strong><br>
+                    <code style="user-select: all;">{{ secret }}</code>
+                </div>
+
+                <p>Once scanned, click below to verify and login.</p>
+                <a href="{{ url_for('verify_2fa') }}" class="btn btn-success w-100">Continue to Verification</a>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

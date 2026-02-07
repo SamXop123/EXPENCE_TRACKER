@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-md-5">
+        <div class="card shadow-sm">
+            <div class="card-header text-center">
+                <h4>Two-Factor Verification</h4>
+            </div>
+            <div class="card-body">
+                <p class="text-center text-muted">Enter the 6-digit code from your authenticator app.</p>
+                
+                <form method="POST">
+                    <div class="mb-4">
+                        <input 
+                            type="text" 
+                            name="token" 
+                            class="form-control form-control-lg text-center" 
+                            placeholder="000 000" 
+                            maxlength="6" 
+                            pattern="\d*" 
+                            inputmode="numeric" 
+                            required 
+                            autofocus
+                            style="letter-spacing: 5px; font-size: 24px;"
+                        >
+                    </div>
+                    <button type="submit" class="btn btn-primary w-100">Verify & Login</button>
+                </form>
+                
+                <div class="text-center mt-3">
+                    <a href="{{ url_for('login') }}" class="text-muted small">Back to Login</a>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
