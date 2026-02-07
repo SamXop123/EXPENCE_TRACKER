@@ -101,8 +101,10 @@ groq_client = Groq(
 )
 
 # --- DATABASE HELPERS ---
+DB_PATH = 'expenses.db'
+
 def get_db_connection():
-    conn = sqlite3.connect('expenses.db')
+    conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     return conn
 
@@ -1500,7 +1502,7 @@ def edit_expense(expense_id):
     expense_dict['description'] = decrypt_data(expense['description'])
 
     user_categories = get_user_categories(session['user_id'])
-    return render_template('edit_expense.html', expense=expense, categories=user_categories, selected_currency=expense['currency'])
+    return render_template('edit_expense.html', expense=expense_dict, categories=user_categories, selected_currency=expense_dict['currency'])
 
 @app.route('/delete_expense/<int:expense_id>')
 def delete_expense(expense_id):
@@ -1822,28 +1824,6 @@ def budgets():
     conn.close()
     return render_template('budgets.html', budgets=budgets_with_spending, currency=display_currency)
 
-@app.route('/activity_log')
-def activity_log():
-    if 'user_id' not in session:
-        return redirect(url_for('login'))
-    
-    conn = get_db_connection()
-    user_id = session['user_id']
-    
-    # We will fetch recent expenses and combine them with budget creations for a timeline
-    activities = conn.execute('''
-        SELECT 'Expense' as type, description, amount, currency, date, category 
-        FROM expenses WHERE user_id = ?
-        UNION ALL
-        SELECT 'Budget' as type, category as description, amount, currency, start_date as date, category
-        FROM budgets WHERE user_id = ?
-        ORDER BY date DESC LIMIT 50
-    ''', (user_id, user_id)).fetchall()
-    
-    conn.close()
-    
-    return render_template('activity_log.html', activities=activities)
-
 @app.route('/add_budget', methods=['GET', 'POST'])
 def add_budget():
     if 'user_id' not in session:
@@ -1918,6 +1898,12 @@ def delete_budget(budget_id):
         return redirect(url_for('login'))
     
     conn = get_db_connection()
+    budget = conn.execute('SELECT * FROM budgets WHERE id=? AND user_id=?', (budget_id, session['user_id'])).fetchone()
+    if not budget:
+        flash('Budget not found!')
+        conn.close()
+        return redirect(url_for('budgets'))
+        
     conn.execute('DELETE FROM budgets WHERE id=? AND user_id=?', (budget_id, session['user_id']))
     conn.commit()
     conn.close()
@@ -2232,6 +2218,12 @@ def group_detail(group_id):
     
     conn = get_db_connection()
     
+    group = conn.execute('SELECT * FROM groups WHERE id = ?', (group_id,)).fetchone()
+    if not group:
+        conn.close()
+        flash("Group not found.")
+        return redirect(url_for('groups'))
+
     # Access Control
     is_member = conn.execute('SELECT 1 FROM group_members WHERE group_id = ? AND user_id = ?',
                               (group_id, session['user_id'])).fetchone()
@@ -2239,8 +2231,6 @@ def group_detail(group_id):
         conn.close()
         flash("You are not a member of this group.")
         return redirect(url_for('groups'))
-    
-    group = conn.execute('SELECT * FROM groups WHERE id = ?', (group_id,)).fetchone()
     
     # Get Creator Username
     creator = conn.execute('SELECT username FROM users WHERE id = ?', (group['created_by'],)).fetchone()

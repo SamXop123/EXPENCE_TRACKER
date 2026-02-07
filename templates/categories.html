@@ -40,18 +40,19 @@
                             <code class="ms-2">{{ cat.color }}</code>
                         </td>
                         <td>
-                            <span class="badge bg-secondary">{{ cat.expense_count }}</span>
+                            <span class="badge bg-secondary">{{ cat.expense_count if cat.expense_count is defined else 0 }}</span>
                         </td>
                         <td>
+                            {% if cat.id %}
                             <a href="{{ url_for('edit_category', category_id=cat.id) }}"
                                 class="btn btn-sm btn-outline-primary">Edit</a>
                             {% if cat.expense_count == 0 %}
                             <a href="{{ url_for('delete_category', category_id=cat.id) }}"
                                 class="btn btn-sm btn-outline-danger"
                                 onclick="return confirm('Are you sure you want to delete this category?')">Delete</a>
+                            {% endif %}
                             {% else %}
-                            <button class="btn btn-sm btn-outline-secondary" disabled
-                                title="Cannot delete - has {{ cat.expense_count }} expense(s)">Delete</button>
+                            <span class="text-muted small">Default</span>
                             {% endif %}
                         </td>
                     </tr>

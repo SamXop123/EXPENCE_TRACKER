@@ -75,8 +75,8 @@
                 {% endif %}
                 
                 <div class="mt-3">
-                    <a href="{{ url_for('edit_budget', budget_id=budget.id) }}" class="btn btn-sm btn-outline-primary">Edit</a>
-                    <a href="{{ url_for('delete_budget', budget_id=budget.id) }}" class="btn btn-sm btn-outline-danger" onclick="return confirm('Are you sure you want to delete this budget?')">Delete</a>
+                    <a href="{{ url_for('edit_budget', budget_id=budget['id']) }}" class="btn btn-sm btn-outline-primary">Edit</a>
+                    <a href="{{ url_for('delete_budget', budget_id=budget['id']) }}" class="btn btn-sm btn-outline-danger" onclick="return confirm('Are you sure you want to delete this budget?')">Delete</a>
                 </div>
             </div>
         </div>
