@@ -51,6 +51,28 @@
                         ></textarea>
                     </div>
 
+                    <div class="mb-3 form-check bg-light p-3 rounded border">
+                        <input type="checkbox" class="form-check-input" id="is_recurring" name="is_recurring" onchange="toggleFrequency()">
+                        <label class="form-check-label fw-bold" for="is_recurring">Recurring Expense (Subscription/Rent)</label>
+                        
+                        <div id="frequency_div" class="mt-2" style="display: none;">
+                            <label class="form-label small text-muted">Frequency:</label>
+                            <select class="form-select form-select-sm" name="frequency">
+                                <option value="monthly">Monthly</option>
+                                <option value="yearly">Yearly</option>
+                                <option value="weekly">Weekly</option>
+                            </select>
+                        </div>
+                    </div>
+                    
+                    <script>
+                    function toggleFrequency() {
+                        var checkBox = document.getElementById("is_recurring");
+                        var freqDiv = document.getElementById("frequency_div");
+                        freqDiv.style.display = checkBox.checked ? "block" : "none";
+                    }
+                    </script>
+
                     <div class="mb-3">
                         <label for="currency" class="form-label">Currency</label>
                         <select

@@ -114,11 +114,12 @@ def init_db():
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             username TEXT UNIQUE NOT NULL,
             email TEXT UNIQUE NOT NULL,
-            password TEXT NOT NULL
+            password TEXT NOT NULL,
+            totp_secret TEXT
         )
     ''')
-    
-    # Expenses Table (with multi-currency support)
+
+    # Expenses Table - UPDATED with Recurring Fields
     conn.execute('''
         CREATE TABLE IF NOT EXISTS expenses (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -129,9 +130,23 @@ def init_db():
             category TEXT NOT NULL,
             description TEXT,
             date TEXT NOT NULL,
+            is_recurring BOOLEAN DEFAULT 0,
+            frequency TEXT DEFAULT 'monthly',
+            next_due_date TEXT,
             FOREIGN KEY (user_id) REFERENCES users (id)
         )
     ''')
+    
+    # [MIGRATION] Check for new columns in expenses
+    cursor = conn.cursor()
+    cursor.execute("PRAGMA table_info(expenses)")
+    columns = [info[1] for info in cursor.fetchall()]
+    
+    if 'is_recurring' not in columns:
+        print("Migrating DB: Adding recurring fields...")
+        conn.execute('ALTER TABLE expenses ADD COLUMN is_recurring BOOLEAN DEFAULT 0')
+        conn.execute('ALTER TABLE expenses ADD COLUMN frequency TEXT DEFAULT "monthly"')
+        conn.execute('ALTER TABLE expenses ADD COLUMN next_due_date TEXT')
     
     # Budgets Table
     conn.execute('''
@@ -353,6 +368,75 @@ def get_user_categories(user_id):
         return [{'name': cat, 'icon': '💰', 'color': '#6c757d'} for cat in default_categories]
     
     return categories
+
+def process_recurring_expenses(user_id):
+    """
+    Lazy checks for recurring expenses that are due.
+    If today >= next_due_date, it creates a new expense entry and updates the date.
+    """
+    conn = get_db_connection()
+    today = datetime.now().date()
+    
+    # Find active recurring expenses that are due
+    due_expenses = conn.execute('''
+        SELECT * FROM expenses 
+        WHERE user_id = ? 
+        AND is_recurring = 1 
+        AND next_due_date <= ?
+    ''', (user_id, today.strftime('%Y-%m-%d'))).fetchall()
+    
+    added_count = 0
+    
+    for exp in due_expenses:
+        # 1. Create the NEW transaction for this month
+        current_due_date = datetime.strptime(exp['next_due_date'], '%Y-%m-%d').date()
+        
+        conn.execute('''
+            INSERT INTO expenses (user_id, amount, currency, amount_usd, category, description, date, is_recurring, frequency, next_due_date)
+            VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, NULL)
+        ''', (
+            user_id, 
+            exp['amount'], 
+            exp['currency'], 
+            exp['amount_usd'], 
+            exp['category'], 
+            f"{exp['description']} (Auto-generated)", 
+            current_due_date.strftime('%Y-%m-%d'),
+            # The new entry is NOT a master recurring trigger itself
+            exp['frequency']
+        ))
+        
+        # 2. Update the "Master" expense to the NEXT due date
+        next_date = current_due_date
+        if exp['frequency'] == 'monthly':
+            # Add 1 month (handle year rollover)
+            month = next_date.month + 1
+            year = next_date.year
+            if month > 12:
+                month = 1
+                year += 1
+            # Handle short months (e.g., Jan 31 -> Feb 28)
+            try:
+                next_date = next_date.replace(year=year, month=month)
+            except ValueError:
+                # If day is out of range (e.g. 30th Feb), go to last day of month
+                import calendar
+                last_day = calendar.monthrange(year, month)[1]
+                next_date = next_date.replace(year=year, month=month, day=last_day)
+                
+        elif exp['frequency'] == 'yearly':
+            next_date = next_date.replace(year=next_date.year + 1)
+        elif exp['frequency'] == 'weekly':
+            next_date = next_date + timedelta(days=7)
+            
+        conn.execute('UPDATE expenses SET next_due_date = ? WHERE id = ?', 
+                     (next_date.strftime('%Y-%m-%d'), exp['id']))
+        
+        added_count += 1
+        
+    conn.commit()
+    conn.close()
+    return added_count
 
 def get_category_by_id(category_id, user_id):
     """Get a specific category by ID for the given user"""
@@ -870,7 +954,17 @@ def login():
         if user and check_password_hash(user['password'], password):
             session['user_id'] = user['id']
             session['username'] = user['username']
-            flash('Logged in successfully!')
+            
+            # --- START NEW CODE: Trigger Recurring Check ---
+            # Since 2FA is not merged yet, we check here immediately on login
+            count = process_recurring_expenses(user['id'])
+            
+            if count > 0:
+                flash(f'Logged in successfully! Auto-added {count} recurring expense(s).')
+            else:
+                flash('Logged in successfully!')
+            # --- END NEW CODE ---
+
             return redirect(url_for('dashboard'))
         else:
             flash('Invalid credentials!')
@@ -1199,14 +1293,43 @@ def add_expense():
         currency = request.form['currency']
         description = request.form['description']
         date = request.form['date'] or datetime.now().strftime('%Y-%m-%d')
+        
+        # Recurring Logic
+        is_recurring = 1 if 'is_recurring' in request.form else 0
+        frequency = request.form.get('frequency', 'monthly')
+        
+        # If recurring, the "next due date" starts 1 cycle from the entered date
+        # OR we can set it to the entered date if we want the *next* one to be tracked.
+        # Usually, if I add a bill today, I want the system to remind me *next* month.
+        next_due_date = None
+        if is_recurring:
+            # Simple logic: If I pay today, next due is next month
+            dt = datetime.strptime(date, '%Y-%m-%d')
+            if frequency == 'monthly':
+                 # (Add month logic same as above helper)
+                month = dt.month + 1
+                year = dt.year
+                if month > 12:
+                    month = 1
+                    year += 1
+                try:
+                    next_due_date = dt.replace(year=year, month=month).strftime('%Y-%m-%d')
+                except ValueError:
+                    import calendar
+                    last_day = calendar.monthrange(year, month)[1]
+                    next_due_date = dt.replace(year=year, month=month, day=last_day).strftime('%Y-%m-%d')
+            elif frequency == 'weekly':
+                next_due_date = (dt + timedelta(days=7)).strftime('%Y-%m-%d')
+            elif frequency == 'yearly':
+                next_due_date = dt.replace(year=dt.year + 1).strftime('%Y-%m-%d')
 
         amount_usd = convert_to_usd(amount, currency)
 
         conn = get_db_connection()
         conn.execute(
-            '''INSERT INTO expenses (user_id, amount, currency, amount_usd, category, description, date) 
-               VALUES (?, ?, ?, ?, ?, ?, ?)''',
-            (session['user_id'], amount, currency, amount_usd, category, description, date)
+            '''INSERT INTO expenses (user_id, amount, currency, amount_usd, category, description, date, is_recurring, frequency, next_due_date) 
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+            (session['user_id'], amount, currency, amount_usd, category, description, date, is_recurring, frequency, next_due_date)
         )
         conn.commit()
         conn.close()
@@ -1573,6 +1696,28 @@ def budgets():
 
     conn.close()
     return render_template('budgets.html', budgets=budgets_with_spending, currency=display_currency)
+
+@app.route('/activity_log')
+def activity_log():
+    if 'user_id' not in session:
+        return redirect(url_for('login'))
+    
+    conn = get_db_connection()
+    user_id = session['user_id']
+    
+    # We will fetch recent expenses and combine them with budget creations for a timeline
+    activities = conn.execute('''
+        SELECT 'Expense' as type, description, amount, currency, date, category 
+        FROM expenses WHERE user_id = ?
+        UNION ALL
+        SELECT 'Budget' as type, category as description, amount, currency, start_date as date, category
+        FROM budgets WHERE user_id = ?
+        ORDER BY date DESC LIMIT 50
+    ''', (user_id, user_id)).fetchall()
+    
+    conn.close()
+    
+    return render_template('activity_log.html', activities=activities)
 
 @app.route('/add_budget', methods=['GET', 'POST'])
 def add_budget():
